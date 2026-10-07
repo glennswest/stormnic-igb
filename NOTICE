@@ -1,0 +1,6 @@
+stormnic-igb
+============
+
+An original Rust implementation, licensed MIT (see LICENSE).
+
+Acknowledgement: hardware facts are learned from Intel's public datasheets and iPXE's intel.c (behaviour only). No source code is copied.
