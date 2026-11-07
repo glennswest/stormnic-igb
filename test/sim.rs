@@ -151,6 +151,10 @@ impl Dev {
         // SAFETY: inside the region.
         u32::from_le(unsafe { std::ptr::read_volatile(self.host(device, 4) as *const u32) })
     }
+    fn set_mem32(&self, device: u64, v: u32) {
+        // SAFETY: inside the region.
+        unsafe { std::ptr::write_volatile(self.host(device, 4) as *mut u32, v.to_le()) }
+    }
     fn set_mem16(&self, device: u64, v: u16) {
         // SAFETY: inside the region.
         unsafe { std::ptr::write_volatile(self.host(device, 2) as *mut u16, v.to_le()) }
@@ -260,26 +264,33 @@ impl Dev {
             self.dropped += 1;
             return;
         }
+        assert_eq!(self.get(igb::SRRCTL) & (7 << 25), igb::SRRCTL_DESCTYPE_ADV_ONEBUF, "advanced one-buffer descriptors");
         let d = self.rx_ring() + 16 * u64::from(self.rx_head);
-        assert_eq!(self.mem8(d + 12), 0, "a descriptor the controller owns has DD set");
+        assert_eq!(self.mem64(d + 8), 0, "a descriptor the controller owns has a header address or DD set");
         let addr = self.mem64(d);
         let p = self.host(addr, f.len());
         // SAFETY: inside the region.
         unsafe { std::ptr::copy_nonoverlapping(f.as_ptr(), p, f.len()); }
-        self.set_mem16(d + 8, f.len() as u16);
-        self.set_mem8(d + 13, 0);
-        self.set_mem8(d + 12, ring::DD | ring::RX_EOP);
+        self.write_back(d, ring::RX_DD | ring::RX_EOP, f.len() as u16);
         self.rx_head = (self.rx_head + 1) % self.rx_count();
         self.put(igb::RDH, self.rx_head);
     }
 
-    /// Hand back the next receive descriptor with these status and error bits.
-    pub fn deliver_raw(&mut self, status: u8, errors: u8, len: u16) {
+    /// The advanced write-back: packet info and RSS hash, status/error,
+    /// length, VLAN.
+    fn write_back(&self, d: u64, status_error: u32, len: u16) {
+        self.set_mem32(d, 0x0000_0011);
+        self.set_mem32(d + 4, 0xdead_beef);
+        self.set_mem16(d + 12, len);
+        self.set_mem16(d + 14, 0);
+        self.set_mem32(d + 8, status_error);
+    }
+
+    /// Hand back the next receive descriptor with this status/error word.
+    pub fn deliver_raw(&mut self, status_error: u32, len: u16) {
         assert!(self.rx_head != self.get(igb::RDT));
         let d = self.rx_ring() + 16 * u64::from(self.rx_head);
-        self.set_mem16(d + 8, len);
-        self.set_mem8(d + 13, errors);
-        self.set_mem8(d + 12, status);
+        self.write_back(d, status_error, len);
         self.rx_head = (self.rx_head + 1) % self.rx_count();
     }
 

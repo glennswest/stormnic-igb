@@ -1,14 +1,18 @@
 //! The receive and transmit descriptor rings of queue 0, polled, one 2 KiB
 //! driver-owned buffer per descriptor.
 //!
-//! Legacy descriptor formats (SRRCTL.DESCTYPE 0; docs/hardware.md), 16 bytes
-//! each, little-endian:
+//! Descriptor formats (docs/hardware.md), 16 bytes each, little-endian:
 //!
-//! - receive: buffer address (0-7), length (8-9), checksum (10-11), status
-//!   (12: DD 0x01, EOP 0x02), errors (13), VLAN tag (14-15);
-//! - transmit: buffer address (0-7), length (8-9), CSO (10), command (11:
-//!   EOP 0x01, IFCS 0x02, RS 0x08), status (12: DD 0x01), CSS (13), VLAN
-//!   (14-15).
+//! - receive, the advanced one-buffer format (SRRCTL.DESCTYPE 001): read
+//!   as packet buffer address (0-7) and header buffer address (8-15, 0:
+//!   no header split; its bit 0 is where DD lands); written back as packet
+//!   info and RSS hash (0-7), extended status/error (8-11: DD bit 0, EOP
+//!   bit 1, frame errors in bits 31:24), length (12-13), VLAN (14-15).
+//!   Every igb part has it; the legacy receive format is not used, since
+//!   QEMU's 82576 model writes the advanced one whatever SRRCTL says;
+//! - transmit, the legacy format: buffer address (0-7), length (8-9), CSO
+//!   (10), command (11: EOP 0x01, IFCS 0x02, RS 0x08), status (12: DD
+//!   0x01), CSS (13), VLAN (14-15).
 //!
 //! Ownership moves by the head and tail registers: the controller owns the
 //! receive descriptors from RDH up to RDT - 1 and the transmit descriptors
@@ -38,17 +42,21 @@ pub const TX_BUFS: usize = RX_BUFS + RX_COUNT * BUF_SIZE;
 pub const DMA_BYTES: usize = TX_BUFS + TX_COUNT * BUF_SIZE;
 pub const DMA_PAGES: usize = DMA_BYTES.div_ceil(4096);
 
-/// Descriptor byte offsets.
+/// Transmit descriptor byte offsets.
 pub const LEN: usize = 8;
 pub const STATUS: usize = 12;
-pub const RX_ERRORS: usize = 13;
+/// Receive (advanced write-back) byte offsets.
+pub const RX_STATUS_ERROR: usize = 8;
+pub const RX_LEN: usize = 12;
 
 pub const DD: u8 = 0x01;
-pub const RX_EOP: u8 = 0x02;
-/// Receive errors that make the frame bad: CRC/alignment, symbol, sequence,
-/// carrier extension, RX data error. (The checksum errors 0x20/0x40 are only
-/// offload results; the frame itself is good.)
-pub const RX_FRAME_ERRORS: u8 = 0x01 | 0x02 | 0x04 | 0x10 | 0x80;
+/// Receive extended status/error bits.
+pub const RX_DD: u32 = 1 << 0;
+pub const RX_EOP: u32 = 1 << 1;
+/// Receive errors that make the frame bad: CRC/alignment (24), symbol (25),
+/// sequence (26), carrier extension (28), RX data error (31). (The checksum
+/// errors are only offload results; the frame itself is good.)
+pub const RX_FRAME_ERRORS: u32 = 0x9700_0000;
 pub const TX_EOP: u8 = 0x01;
 pub const TX_IFCS: u8 = 0x02;
 pub const TX_RS: u8 = 0x08;
@@ -124,6 +132,11 @@ impl Net {
         unsafe { ptr::read_volatile(self.dma.host.add(off)) }
     }
 
+    fn r32(&self, off: usize) -> u32 {
+        // SAFETY: as `r8`; 4-byte aligned.
+        u32::from_le(unsafe { ptr::read_volatile(self.dma.host.add(off) as *const u32) })
+    }
+
     fn r16(&self, off: usize) -> u16 {
         // SAFETY: as `r8`; descriptor fields are 2-byte aligned.
         u16::from_le(unsafe { ptr::read_volatile(self.dma.host.add(off) as *const u16) })
@@ -142,7 +155,8 @@ impl Net {
     fn rx_desc(i: usize) -> usize { RX_RING + i * DESC }
     fn tx_desc(i: usize) -> usize { TX_RING + i * DESC }
 
-    /// Point receive descriptor `i` at its buffer, status clear.
+    /// Point receive descriptor `i` at its buffer; the header address (and
+    /// with it DD) zero.
     fn post_rx(&self, i: usize) {
         let d = Self::rx_desc(i);
         self.w64(d, self.dma.device + (RX_BUFS + i * BUF_SIZE) as u64);
@@ -245,12 +259,12 @@ impl Net {
         if !self.running { return Ok(None); }
         loop {
             let d = Self::rx_desc(self.rx_next);
-            let status = self.r8(d + STATUS);
-            if status & DD == 0 { return Ok(None); }
+            let status = self.r32(d + RX_STATUS_ERROR);
+            if status & RX_DD == 0 { return Ok(None); }
             dma_rmb();
-            let len = self.r16(d + LEN) as usize;
-            let errors = self.r8(d + RX_ERRORS);
-            if errors & RX_FRAME_ERRORS != 0 || status & RX_EOP == 0 || !(MIN_FRAME..=BUF_SIZE).contains(&len) {
+            let status = self.r32(d + RX_STATUS_ERROR);
+            let len = self.r16(d + RX_LEN) as usize;
+            if status & RX_FRAME_ERRORS != 0 || status & RX_EOP == 0 || !(MIN_FRAME..=BUF_SIZE).contains(&len) {
                 self.rx_errors += 1;
                 self.skip(b)?;
                 continue;

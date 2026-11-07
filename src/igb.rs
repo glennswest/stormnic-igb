@@ -117,9 +117,10 @@ pub const TCTL_COLD: u32 = 0x3f << 12;
 pub const TCTL_RTLC: u32 = 1 << 24;
 // RAH.
 pub const RAH_AV: u32 = 1 << 31;
-// SRRCTL: packet buffer size in KB (descriptor type field 0: legacy), drop
-// when no descriptor is free.
+// SRRCTL: packet buffer size in KB, descriptor type (001: advanced, one
+// buffer), drop when no descriptor is free.
 pub const SRRCTL_BSIZE_2K: u32 = 2;
+pub const SRRCTL_DESCTYPE_ADV_ONEBUF: u32 = 1 << 25;
 pub const SRRCTL_DROP_EN: u32 = 1 << 31;
 // RXDCTL / TXDCTL.
 pub const QUEUE_ENABLE: u32 = 1 << 25;
@@ -406,14 +407,15 @@ pub fn mac_init<B: Bus>(b: &mut B, mac: [u8; 6], rings: Rings) -> R<(), B::Error
     for i in 0..MTA_COUNT { b.w32(MTA + 4 * i, 0)?; }
     b.w32(MRQC, 0)?;
     b.w32(RCTL, 0)?;
-    // Receive queue 0: legacy descriptors, 2 KB buffers, drop when full.
+    // Receive queue 0: advanced one-buffer descriptors, 2 KB buffers, drop
+    // when full.
     b.w32(RXDCTL, 0)?;
     b.w32(RDBAL, rings.rx as u32)?;
     b.w32(RDBAH, (rings.rx >> 32) as u32)?;
     b.w32(RDLEN, rings.rx_bytes)?;
     b.w32(RDH, 0)?;
     b.w32(RDT, 0)?;
-    b.w32(SRRCTL, SRRCTL_BSIZE_2K | SRRCTL_DROP_EN)?;
+    b.w32(SRRCTL, SRRCTL_BSIZE_2K | SRRCTL_DESCTYPE_ADV_ONEBUF | SRRCTL_DROP_EN)?;
     b.w32(RXDCTL, QUEUE_ENABLE | WTHRESH_1)?;
     if !wait(b, 100, 100, |b| Ok(b.r32(RXDCTL)? & QUEUE_ENABLE != 0))? {
         return Err(Error::QueueTimeout { tx: false, value: b.r32(RXDCTL)? });

@@ -94,7 +94,7 @@ fn start_turns_flow_control_off_and_drops_when_the_ring_is_full() {
     let srrctl = d.get(igb::SRRCTL);
     assert!(srrctl & igb::SRRCTL_DROP_EN != 0);
     assert_eq!(srrctl & 0x7f, 2, "2 KB buffers");
-    assert_eq!(srrctl & (7 << 25), 0, "legacy descriptors");
+    assert_eq!(srrctl & (7 << 25), 1 << 25, "advanced one-buffer receive descriptors");
     assert!(d.get(igb::CTRL_EXT) & igb::CTRL_EXT_DRV_LOAD != 0);
 }
 
@@ -282,9 +282,9 @@ fn a_full_ring_drops_and_recovers() {
 #[test]
 fn bad_descriptors_are_skipped_and_counted() {
     let (mut d, mut net) = started();
-    d.deliver_raw(ring::DD | ring::RX_EOP, 0x01, 60); // CRC error
-    d.deliver_raw(ring::DD, 0, 60); // not the end of the frame
-    d.deliver_raw(ring::DD | ring::RX_EOP, 0, 6); // runt
+    d.deliver_raw(ring::RX_DD | ring::RX_EOP | 1 << 24, 60); // CRC error
+    d.deliver_raw(ring::RX_DD, 60); // not the end of the frame
+    d.deliver_raw(ring::RX_DD | ring::RX_EOP, 6); // runt
     d.deliver(&frame_to(MAC, 7));
     let mut buf = [0u8; ring::BUF_SIZE];
     assert_eq!(net.receive(&mut d, &mut buf).unwrap(), Some(60));
@@ -296,10 +296,10 @@ fn bad_descriptors_are_skipped_and_counted() {
 fn a_checksum_error_alone_is_still_a_good_frame() {
     let (mut d, mut net) = started();
     d.deliver(&frame_to(MAC, 1));
-    // Mark the descriptor just written with the TCP checksum error bit.
+    // Mark the descriptor just written with the L4 checksum error bit (29).
     let desc = (net.rings().rx - DEVICE_BASE) as usize;
-    // SAFETY: the first receive descriptor, inside the region.
-    unsafe { *d.dma().host.add(desc + 13) = 0x20; }
+    // SAFETY: the first receive descriptor's status/error byte 3, inside the region.
+    unsafe { *d.dma().host.add(desc + 11) = 0x20; }
     let mut buf = [0u8; ring::BUF_SIZE];
     assert_eq!(net.receive(&mut d, &mut buf).unwrap(), Some(60));
 }

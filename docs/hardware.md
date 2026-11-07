@@ -41,7 +41,8 @@ are left as the NVM set them and their link is read from STATUS.
 | 0xe000… | queue 0 transmit | TDBAL, TDBAH, TDLEN, TDH (+0x10), TDT (+0x18), TXDCTL (+0x28) |
 
 SRRCTL: packet buffer size in KB (6:0), descriptor type (27:25; 000 the
-legacy format), drop when no descriptor is free (31). RXDCTL/TXDCTL:
+legacy format, 001 advanced with one buffer, the one used here), drop when
+no descriptor is free (31). RXDCTL/TXDCTL:
 prefetch, host and write-back thresholds (4:0, 12:8, 20:16) and the queue
 enable (25), which reads back set once the queue runs and clear once it has
 stopped.
@@ -62,7 +63,7 @@ MAC sees it again once CTRL.SLU is set.
 **Bring-up** (`mac_init`, then the driver's ring fill): CTRL with link up,
 nothing forced, flow control off; FCRTL/FCRTH/FCTTV zero; RAL0/RAH0 with
 the address and AV; MTA zero; MRQC zero; the receive queue's ring, length,
-heads/tails at 0 and SRRCTL (2 KB, legacy, drop enabled), then RXDCTL's
+heads/tails at 0 and SRRCTL (2 KB, advanced one-buffer, drop enabled), then RXDCTL's
 enable (write-back threshold 1) and wait for it; the same for transmit;
 TCTL on; CTRL_EXT driver-loaded. Then the driver posts every receive
 buffer, moves RDT to count − 1 and turns RCTL on (strip CRC, broadcast,
@@ -76,14 +77,20 @@ PHY register touched is BMCR (0): if it has power-down (11) or isolate (10)
 set, or autonegotiation enable (12) clear, it is rewritten without them and
 with autonegotiation restarted (9).
 
-## Legacy descriptors (16 bytes)
+## Descriptors (16 bytes)
 
-Receive: buffer address (0–7), length (8–9), checksum (10–11), status (12:
-DD 0x01 done, EOP 0x02 end of packet), errors (13: CRC 0x01, symbol 0x02,
-sequence 0x04, carrier extension 0x10, RX data 0x80; 0x20/0x40 are only
-TCP/IP checksum results), VLAN (14–15).
+Receive, advanced one-buffer format. The driver writes the packet buffer
+address (0–7) and a zero header buffer address (8–15: no header split).
+The controller writes back packet type and RSS information (0–7), the
+extended status/error word (8–11: DD bit 0 done, EOP bit 1 end of packet;
+frame errors CRC 24, symbol 25, sequence 26, carrier extension 28, RX data
+31; the IP/L4 checksum error bits are only offload results), the length
+(12–13) and the VLAN tag (14–15). DD lands in bit 0 of the old header
+address, which is why that field must be zero when the descriptor is
+posted. The legacy receive format (SRRCTL type 000) is not used: QEMU's
+82576 model writes the advanced format whatever SRRCTL says.
 
-Transmit: buffer address (0–7), length (8–9), checksum offset (10),
+Transmit, legacy format: buffer address (0–7), length (8–9), checksum offset (10),
 command (11: EOP 0x01, insert FCS 0x02, report status 0x08), status (12:
 DD 0x01), checksum start (13), VLAN (14–15).
 

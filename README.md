@@ -55,7 +55,8 @@ stormbootx takes the NIC from it with `prefer_media_drivers = igb`.
   MAC device-path node.
 - **SNP**: only Initialize turns RX/TX on; Shutdown, Stop, binding Stop and
   ExitBootServices quiesce it (receive and transmit off, queues disabled,
-  MAC reset). Polled, one queue, legacy descriptors, 32 + 32 buffers of
+  MAC reset). Polled, one queue (advanced one-buffer receive descriptors,
+  legacy transmit descriptors), 32 + 32 buffers of
   2 KB, frames copied in and out. The controller accepts its address,
   broadcast and all multicast; the SNP receive filters are applied in
   software (promiscuous in RCTL).
