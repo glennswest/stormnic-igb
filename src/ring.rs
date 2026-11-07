@@ -40,7 +40,6 @@ pub const DMA_PAGES: usize = DMA_BYTES.div_ceil(4096);
 
 /// Descriptor byte offsets.
 pub const LEN: usize = 8;
-pub const TX_CMD: usize = 11;
 pub const STATUS: usize = 12;
 pub const RX_ERRORS: usize = 13;
 

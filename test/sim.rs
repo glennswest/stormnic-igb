@@ -90,6 +90,8 @@ impl Dev {
         };
         d.phy.insert(igb::MII_BMCR, BMCR_DEFAULT);
         d.power_on();
+        // Power-on: the link is already up (only a later MAC reset drops it).
+        d.relink_at = 0;
         // What a firmware driver typically leaves: link up, flow control on.
         d.put(igb::CTRL, igb::CTRL_SLU | igb::CTRL_RFCE | igb::CTRL_TFCE);
         d.put(igb::FCRTH, 0x8000_3000);
