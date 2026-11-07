@@ -3,4 +3,15 @@ stormnic-igb
 
 An original Rust implementation, licensed MIT (see LICENSE).
 
-Acknowledgement: hardware facts are learned from Intel's public datasheets and iPXE's intel.c (behaviour only). No source code is copied.
+Acknowledgement: the hardware facts in src/igb.rs, src/ring.rs and
+docs/hardware.md (register offsets, bit fields, the reset and queue-enable
+sequences, the legacy descriptor formats) are from Intel's public
+datasheets for the 82576, I350 and I210 Ethernet controllers. Two device
+IDs (8086:1534, 8086:1535) that pci.ids lacks are from the device-ID list
+of Intel's shared code as FreeBSD carries it (sys/dev/e1000/e1000_hw.h,
+BSD-3-Clause); only the two numbers were taken.
+
+No code was copied. Linux's igb and iPXE's intel.c (GPL) were not
+translated. The UEFI glue (driver binding, SNP, console, PCI I/O, decode)
+and the check app come from the siblings stormnic-realtek and
+stormnic-virtio (MIT, same author).
