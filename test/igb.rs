@@ -191,6 +191,8 @@ fn a_phy_the_firmware_holds_is_left_alone() {
     assert!(matches!(igb::phy_up(&mut d, &id).unwrap(), Phy::Skipped(PhySkip::Busy { .. })));
     assert_eq!(d.phy_locked_accesses + d.phy_unlocked_accesses, 0);
     assert!(d.now < 2_000_000, "gave up in about 1 s ({} us)", d.now);
+    assert_eq!(d.get(igb::SWSM), 0, "SWSM left taken");
+    assert_eq!(d.get(igb::SW_FW_SYNC) & 0xffff, 0, "a software bit left set");
 }
 
 #[test]

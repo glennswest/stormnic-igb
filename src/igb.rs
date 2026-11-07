@@ -472,9 +472,11 @@ fn give_swsm<B: Bus>(b: &mut B) -> R<(), B::Error> { clr32(b, SWSM, SWSM_SMBI | 
 pub enum PhySkip {
     /// No internal PHY: the media is not copper.
     NotCopper(Media),
-    /// The semaphore could not be had in about 1 s (firmware holds the PHY, or the
-    /// controller does not implement the semaphore).
-    Busy { swsm: u32, sync: u32 },
+    /// The semaphore could not be had in about 1 s (firmware holds the PHY,
+    /// or the controller does not implement the semaphore). SW_FW_SYNC as
+    /// last read; SWSM is not read for this, since a read that finds SMBI
+    /// clear takes it.
+    Busy { sync: u32 },
 }
 
 /// Run `f` holding this function's PHY bit in SW_FW_SYNC. Err(PhySkip::Busy)
@@ -483,9 +485,10 @@ pub fn with_phy<B: Bus, T>(b: &mut B, func: u32, f: impl FnOnce(&mut B) -> R<T, 
     -> R<Result<T, PhySkip>, B::Error> {
     let bit = Mac::phy_sync_bit(func);
     let mut got = false;
+    let mut sync = 0;
     for _ in 0..100 {
         if take_swsm(b)? {
-            let sync = b.r32(SW_FW_SYNC)?;
+            sync = b.r32(SW_FW_SYNC)?;
             if sync & (bit | (bit << SYNC_FW_SHIFT)) == 0 {
                 b.w32(SW_FW_SYNC, sync | bit)?;
                 got = b.r32(SW_FW_SYNC)? & bit != 0;
@@ -498,7 +501,7 @@ pub fn with_phy<B: Bus, T>(b: &mut B, func: u32, f: impl FnOnce(&mut B) -> R<T, 
         b.delay_us(5000);
     }
     if !got {
-        return Ok(Err(PhySkip::Busy { swsm: b.r32(SWSM)?, sync: b.r32(SW_FW_SYNC)? }));
+        return Ok(Err(PhySkip::Busy { sync }));
     }
     let r = f(b);
     // Give the bit back whatever `f` did.

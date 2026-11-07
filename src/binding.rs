@@ -462,8 +462,8 @@ fn bring_up(bars: &mut Bars, net: &mut Net, id: &Identity, at: &impl core::fmt::
             trace!("stormnic-igb: {at} 8086:{dev:04x}: {} media: no internal PHY to check", m.name());
             if id.link.up { 2000 } else { 0 }
         }
-        Phy::Skipped(PhySkip::Busy { swsm, sync }) => {
-            say!("stormnic-igb: {at} 8086:{dev:04x}: PHY semaphore not free in 1 s (SWSM {swsm:#x}, SW_FW_SYNC {sync:#x}); PHY not checked");
+        Phy::Skipped(PhySkip::Busy { sync }) => {
+            say!("stormnic-igb: {at} 8086:{dev:04x}: PHY semaphore not free in 1 s (SW_FW_SYNC {sync:#x}); PHY not checked");
             if id.link.up { 2000 } else { 0 }
         }
     };
