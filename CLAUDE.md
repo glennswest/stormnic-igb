@@ -67,11 +67,14 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
 ## Work plan
 
 - [ ] #1 UEFI SNP driver: bind, link, transmit/receive; pinned in stormbootx
-  - [ ] Scaffold: workspace (driver + `check/`), build.rs subsystem 11,
-        glue from stormnic-realtek, PCI IDs from pci.ids 2026.11.06
-  - [ ] Hardware core (reset, MAC address, PHY check, rings), SNP core
-  - [ ] Host tests (`sc-build scripts/test-host.sh`)
-  - [ ] `sc-build scripts/check-driver.sh`: subsystem 11, no warnings
+  - [x] Scaffold: workspace (driver + `check/`), build.rs subsystem 11,
+        glue from stormnic-realtek, PCI IDs from pci.ids 2026.11.06 (0dc68b6)
+  - [x] Hardware core (reset, MAC address, PHY check, rings), SNP core
+  - [x] Host tests: `sc-build scripts/test-host.sh` at 31e6bdf, 42 pass
+        (igb 26, snp 13, trace 3)
+  - [x] `sc-build scripts/check-driver.sh` at 31e6bdf: x86_64 57,856 B and
+        aarch64 54,272 B, PE32+ subsystem 11, clippy -D warnings clean
+        (#2, the one dead-code error, fixed there)
   - [ ] QEMU/OVMF igb (`sc-build scripts/test-ovmf.sh`)
   - [ ] stormbootx: issue to pin it in build-nic-drivers.sh
         (`prefer_media_drivers = igb`); #1 proposed `--after` it
