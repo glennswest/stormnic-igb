@@ -1,0 +1,37 @@
+[package]
+name = "stormnic-igb"
+description = "Rust no_std UEFI EFI_SIMPLE_NETWORK driver for Intel igb gigabit NICs (82575/82576/82580/I350/I354/I210/I211), loaded by stormbootx from its boot media"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "stormnic-igb"
+path = "src/main.rs"
+
+[features]
+# Print the whole bring-up trace on the console at every boot. Without it the
+# trace is printed only when the EFI variable StormnicVerbose is set
+# (src/console.rs).
+verbose = []
+
+[dependencies]
+uefi = { version = "0.39", features = ["alloc", "global_allocator", "panic_handler", "logger"] }
+uefi-raw = "0.15"
+# Only to cap the uefi crate's logger; log 0.4 is already in the lock through uefi.
+log = "0.4"
+
+[lints.rust]
+warnings = "deny"
+
+# The check app (check/): an EFI application that binds this driver under
+# OVMF and runs DHCP, ping and UDP echo over its SNP. `cargo build` at the
+# root builds only the driver.
+[workspace]
+members = ["check"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true
