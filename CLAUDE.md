@@ -66,7 +66,8 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
 
 ## Work plan
 
-- [ ] #1 UEFI SNP driver: bind, link, transmit/receive; pinned in stormbootx
+- [x] #1 UEFI SNP driver: bind, link, transmit/receive (closed 2026-11-07;
+      the pin is stormbootx#69's, which waited on #1)
   - [x] Scaffold: workspace (driver + `check/`), build.rs subsystem 11,
         glue from stormnic-realtek, PCI IDs from pci.ids 2026.11.06 (0dc68b6)
   - [x] Hardware core (reset, MAC address, PHY check, rings), SNP core
@@ -80,7 +81,7 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
         Two QEMU-model findings fixed on the way (#3): STATUS.LU comes back
         only after an autonegotiation (98ea20f `relink`), and receive
         descriptors are written in the advanced format only (1d5b3d2)
-  - [ ] stormbootx: pin 1d5b3d2 in build-nic-drivers.sh (asked on
-        stormbootx#69); #1 proposed `--after` it
+  - [x] stormbootx: pin 80c9ea5 (v0.1.0) in build-nic-drivers.sh, asked
+        on stormbootx#69 (its own work, released by closing #1)
   - [ ] Later, not blocking: a real I350/I210/82576 (none in the lab,
         2026-11-07); the relink path was only seen on QEMU
