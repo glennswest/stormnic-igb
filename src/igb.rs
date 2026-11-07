@@ -132,6 +132,9 @@ pub const SYNC_FW_SHIFT: u32 = 16;
 
 // Standard MII registers of the PHY, and their bits.
 pub const MII_BMCR: u32 = 0;
+pub const MII_BMSR: u32 = 1;
+/// BMSR: the PHY has link (latched low: the second of two reads is now).
+pub const BMSR_LINK: u16 = 1 << 2;
 pub const BMCR_RESTART_AN: u16 = 1 << 9;
 pub const BMCR_ISOLATE: u16 = 1 << 10;
 pub const BMCR_PDOWN: u16 = 1 << 11;
@@ -555,6 +558,42 @@ pub fn phy_up<B: Bus>(b: &mut B, id: &Identity) -> R<Phy, B::Error> {
         Ok(Phy::Restarted { before: bmcr, after: want })
     })?;
     Ok(r.unwrap_or_else(Phy::Skipped))
+}
+
+/// What `relink` saw and did, for the trace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Relink {
+    pub link: Link,
+    /// BMSR when STATUS.LU stayed down on a copper port (None: not read,
+    /// or the PHY semaphore was busy).
+    pub bmsr: Option<u16>,
+    /// Autonegotiation was restarted to bring STATUS.LU back.
+    pub restarted: bool,
+}
+
+/// After a MAC reset (`Net::start`): wait up to `ms` for STATUS.LU. If it
+/// is still down on a copper port whose PHY says it has link (BMSR), the
+/// MAC did not pick the PHY's link up again: restart autonegotiation (BMCR
+/// only, never a PHY reset) and wait up to 5 s more. Real controllers see
+/// the PHY's link again within milliseconds of the reset; QEMU's 82576
+/// model raises STATUS.LU only at the end of an autonegotiation. A port
+/// with no cable has no link in BMSR either, so it costs no extra wait.
+pub fn relink<B: Bus>(b: &mut B, func: u32, media: Media, ms: usize) -> R<Relink, B::Error> {
+    let link = wait_link(b, ms)?;
+    if link.up || media != Media::Copper {
+        return Ok(Relink { link, bmsr: None, restarted: false });
+    }
+    let r = with_phy(b, func, |b| {
+        mii_r(b, MII_BMSR)?;
+        let bmsr = mii_r(b, MII_BMSR)?;
+        if bmsr & BMSR_LINK == 0 { return Ok((bmsr, false)); }
+        let bmcr = mii_r(b, MII_BMCR)?;
+        mii_w(b, MII_BMCR, wanted_bmcr(bmcr) | BMCR_RESTART_AN)?;
+        Ok((bmsr, true))
+    })?;
+    let Ok((bmsr, restarted)) = r else { return Ok(Relink { link, bmsr: None, restarted: false }) };
+    let link = if restarted { wait_link(b, 5000)? } else { link };
+    Ok(Relink { link, bmsr: Some(bmsr), restarted })
 }
 
 /// Wait up to `ms` for the link; the last state read.

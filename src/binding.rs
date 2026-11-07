@@ -424,6 +424,8 @@ fn dma_up(pci: &PciIo, at: &impl core::fmt::Display, dev: u16, id: &Identity)
     // SAFETY: the region is DMA_BYTES (rounded to pages) from AllocateBuffer,
     // mapped at `device`, and only this Net uses it until it is released.
     let mut net = unsafe { Net::new(Dma { host: region.host, device: region.device }, mac) };
+    net.func = id.func;
+    net.media = id.media;
     let checked = bring_up(&mut bars, &mut net, id, at, dev, region.device);
     if let Err(e) = &checked {
         fail!("stormnic-igb: {at} 8086:{dev:04x}: bring-up failed: {}", igb_error(e));
@@ -467,7 +469,16 @@ fn bring_up(bars: &mut Bars, net: &mut Net, id: &Identity, at: &impl core::fmt::
             if id.link.up { 2000 } else { 0 }
         }
     };
-    let link = igb::wait_link(bars, wait_ms)?;
+    let r = igb::relink(bars, id.func, id.media, wait_ms)?;
+    match (r.bmsr, r.restarted) {
+        (Some(bmsr), true) => trace!(
+            "stormnic-igb: {at} 8086:{dev:04x}: STATUS.LU down after the MAC reset with the PHY linked (BMSR {bmsr:#06x}); autonegotiation restarted, link {}",
+            r.link
+        ),
+        (Some(bmsr), false) => trace!("stormnic-igb: {at} 8086:{dev:04x}: link down, PHY has no link either (BMSR {bmsr:#06x})"),
+        _ => {}
+    }
+    let link = r.link;
     trace!(
         "stormnic-igb: {at} 8086:{dev:04x}: DMA: {} pages at device {device:#x}, rings RX {} / TX {} x {} B; link {link}",
         ring::DMA_PAGES, ring::RX_COUNT, ring::TX_COUNT, ring::BUF_SIZE

@@ -46,6 +46,9 @@ pub struct Dev {
     /// PHY register accesses made while software held the PHY bit / not.
     pub phy_locked_accesses: usize,
     pub phy_unlocked_accesses: usize,
+    /// QEMU's model: after a MAC reset STATUS.LU stays down until an
+    /// autonegotiation ends (real controllers see the PHY's link again).
+    pub qemu_relink: bool,
     /// The LAN function (STATUS.FUNC_ID), which picks the PHY's sync bit.
     pub function: u32,
     tx_head: u32,
@@ -78,6 +81,7 @@ impl Dev {
             queue_stuck: false,
             mdic_stuck: false,
             fw_holds_phy: false,
+            qemu_relink: false,
             phy_locked_accesses: 0,
             phy_unlocked_accesses: 0,
             function: 0,
@@ -114,7 +118,7 @@ impl Dev {
         }
         self.tx_head = 0;
         self.rx_head = 0;
-        self.relink_at = self.now + RELINK_US;
+        self.relink_at = if self.qemu_relink { u64::MAX } else { self.now + RELINK_US };
     }
 
     pub fn dma(&self) -> Dma { Dma { host: self.base, device: DEVICE_BASE } }
@@ -193,13 +197,18 @@ impl Dev {
             self.put(igb::MDIC, v | igb::MDIC_READY | igb::MDIC_ERROR);
             return;
         }
-        let data = if v & igb::MDIC_OP_READ != 0 {
+        let data = if v & igb::MDIC_OP_READ != 0 && reg == igb::MII_BMSR {
+            // 10/100/1000 abilities, autonegotiation able; link from the cable.
+            let pdown = self.phy.get(&igb::MII_BMCR).copied().unwrap_or(0) & igb::BMCR_PDOWN != 0;
+            0x7949 | if self.cable && !pdown { igb::BMSR_LINK } else { 0 }
+        } else if v & igb::MDIC_OP_READ != 0 {
             self.phy.get(&reg).copied().unwrap_or(0)
         } else {
             let mut w = v as u16;
             if reg == igb::MII_BMCR && w & igb::BMCR_RESTART_AN != 0 {
                 self.an_restarts += 1;
                 self.an_done_at = self.now + AN_US;
+                self.relink_at = 0;
                 w &= !igb::BMCR_RESTART_AN;
             }
             self.phy.insert(reg, w);

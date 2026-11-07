@@ -184,7 +184,8 @@ impl Snp {
 
     /// Bring the NIC up and read the link. The MAC reset drops the MAC's
     /// side of the link (not the PHY's): if it was up, wait up to 1 s for
-    /// it to come back, so Mode shows the media present.
+    /// it to come back, so Mode shows the media present (`relink` restarts
+    /// autonegotiation if the MAC does not see the PHY's link again).
     fn run<B: Bus>(&mut self, b: &mut B) -> F<(), B::Error> {
         let promiscuous = self.setting & PROMISCUOUS != 0;
         if let Err(e) = self.net.start(b, promiscuous) {
@@ -192,7 +193,8 @@ impl Snp {
             self.state = State::Started;
             return Err(e.into());
         }
-        self.link = super::wait_link(b, if self.link.up { 1000 } else { 0 })?;
+        let r = super::relink(b, self.net.func, self.net.media, if self.link.up { 1000 } else { 0 })?;
+        self.link = r.link;
         self.media = self.link.up;
         Ok(())
     }

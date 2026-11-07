@@ -66,12 +66,16 @@ boot() {
         -netdev user,id=n0 -device igb,netdev=n0,romfile= \
         -serial file:"$log" -monitor none -display none </dev/null >/dev/null 2>&1 || true
     sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | tr -d '\r' | grep -E '^(stormnic-igb|check:|STORMNIC-IGB)' || true
-    grep -q 'STORMNIC-IGB CHECK PASS' "$log" || die "$name: no PASS line"
-    grep -q "stormnic-igb [0-9.]*: .*8086:10c9 .*SNP installed" "$log" || die "$name: no driver line for 8086:10c9"
+    if ! grep -q 'STORMNIC-IGB CHECK PASS' "$log"; then say "$name: FAIL: no PASS line"; failed+=("$name"); return; fi
+    if ! grep -q "stormnic-igb [0-9.]*: .*8086:10c9 .*SNP installed" "$log"; then say "$name: FAIL: no driver line for 8086:10c9"; failed+=("$name"); return; fi
     say "$name: PASS"
 }
+# Both boots run whatever the first does, so a failure still shows the
+# verbose trace.
+failed=()
 boot quiet
-if grep -q 'stormnic-igb: .*MAC reset' "$W/quiet.log"; then die "quiet: the bring-up trace was printed without StormnicVerbose"; fi
+if grep -q 'stormnic-igb: .*MAC reset' "$W/quiet.log"; then say "quiet: FAIL: the bring-up trace was printed without StormnicVerbose"; failed+=(quiet-trace); fi
 boot verbose
-grep -q 'stormnic-igb: .*DMA check: broadcast frame sent' "$W/verbose.log" || die "verbose: no DMA check line in the trace"
+if ! grep -q 'stormnic-igb: .*DMA check: broadcast frame sent' "$W/verbose.log"; then say "verbose: FAIL: no DMA check line in the trace"; failed+=(verbose-dma); fi
+(( ${#failed[@]} == 0 )) || die "failed: ${failed[*]}"
 say "all boots passed"

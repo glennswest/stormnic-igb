@@ -206,3 +206,13 @@ fn mcast_ip_to_mac_maps_both_families() {
     assert_eq!(snp::mcast_ip_to_mac(true, &v6), Some([0x33, 0x33, 1, 2, 3, 4]));
     assert_eq!(snp::mcast_ip_to_mac(false, &[10; 16]), None);
 }
+
+#[test]
+fn initialize_on_qemu_s_model_renegotiates_and_has_media() {
+    let (mut d, mut s) = snp();
+    d.qemu_relink = true;
+    s.start::<()>().unwrap();
+    s.initialize(&mut d).unwrap();
+    assert!(s.media, "{}", s.link);
+    assert_eq!(d.an_restarts, 1);
+}

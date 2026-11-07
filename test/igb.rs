@@ -334,3 +334,44 @@ fn promiscuous_reaches_rctl_only_while_running() {
     let net2: Net = d2.net();
     assert!(!net2.running);
 }
+
+// Relink after a MAC reset.
+
+#[test]
+fn a_real_controller_relinks_without_renegotiating() {
+    let mut d = Dev::new();
+    let mut net = d.net();
+    net.start(&mut d, false).unwrap();
+    let r = igb::relink(&mut d, 0, Media::Copper, 2000).unwrap();
+    assert!(r.link.up && !r.restarted);
+    assert_eq!(d.an_restarts, 0);
+}
+
+#[test]
+fn qemu_s_model_gets_its_link_back_by_renegotiating() {
+    let mut d = Dev::new();
+    d.qemu_relink = true;
+    let mut net = d.net();
+    net.start(&mut d, false).unwrap();
+    assert!(!igb::link(&mut d).unwrap().up, "the reset dropped STATUS.LU");
+    let r = igb::relink(&mut d, 0, Media::Copper, 0).unwrap();
+    assert!(r.restarted && r.link.up, "{r:?}");
+    assert_eq!(r.bmsr.map(|b| b & igb::BMSR_LINK), Some(igb::BMSR_LINK));
+    assert_eq!(d.an_restarts, 1);
+    assert_eq!(d.phy_unlocked_accesses, 0);
+    assert_eq!(d.get(igb::SW_FW_SYNC), 0);
+}
+
+#[test]
+fn no_cable_is_not_renegotiated() {
+    let mut d = Dev::new();
+    d.qemu_relink = true;
+    d.cable = false;
+    let mut net = d.net();
+    net.start(&mut d, false).unwrap();
+    let t = d.now;
+    let r = igb::relink(&mut d, 0, Media::Copper, 0).unwrap();
+    assert!(!r.restarted && !r.link.up);
+    assert_eq!(r.bmsr.map(|b| b & igb::BMSR_LINK), Some(0));
+    assert!(d.now - t < 100_000, "waited {} us", d.now - t);
+}

@@ -87,6 +87,9 @@ pub fn frame(f: &[u8]) -> Frame {
 pub struct Net {
     dma: Dma,
     pub mac: [u8; 6],
+    /// The LAN function and link mode (`identify`), for `relink`.
+    pub func: u32,
+    pub media: super::Media,
     /// The receive descriptor to look at next.
     rx_next: usize,
     /// Transmit descriptors handed to the controller and not yet seen back:
@@ -104,7 +107,7 @@ impl Net {
     /// `dma.host` is `DMA_BYTES` of memory the device reaches at
     /// `dma.device`, used by nothing else while this `Net` lives.
     pub unsafe fn new(dma: Dma, mac: [u8; 6]) -> Net {
-        Net { dma, mac, rx_next: 0, tx_prod: 0, tx_cons: 0, running: false, rx_errors: 0 }
+        Net { dma, mac, func: 0, media: super::Media::Copper, rx_next: 0, tx_prod: 0, tx_cons: 0, running: false, rx_errors: 0 }
     }
 
     pub fn rings(&self) -> Rings {
