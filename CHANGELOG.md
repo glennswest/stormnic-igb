@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [v0.1.0] — 2026-11-07
+
+### Fixed
+- After a MAC reset, autonegotiation is restarted when STATUS.LU stays down
+  while the PHY's BMSR has link (QEMU's 82576 raises LU only at the end of an
+  autonegotiation; #3).
+- Receive uses the advanced one-buffer descriptor format (QEMU's 82576
+  writes no legacy receive descriptors; #3).
+- The PHY-busy diagnostic no longer reads SWSM (a read takes the semaphore).
+- An unused constant failed the build under `warnings = "deny"` (#2).
+
 ### 2026-11-07
 - **feat:** the igb UEFI SNP driver (#1): EFI driver binding for 36 igb
   physical-function IDs (82575, 82576, 82580, I350, I354, I210, I211,

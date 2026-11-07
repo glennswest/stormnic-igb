@@ -70,11 +70,17 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
   - [x] Scaffold: workspace (driver + `check/`), build.rs subsystem 11,
         glue from stormnic-realtek, PCI IDs from pci.ids 2026.11.06 (0dc68b6)
   - [x] Hardware core (reset, MAC address, PHY check, rings), SNP core
-  - [x] Host tests: `sc-build scripts/test-host.sh` at 31e6bdf, 42 pass
-        (igb 26, snp 13, trace 3)
-  - [x] `sc-build scripts/check-driver.sh` at 31e6bdf: x86_64 57,856 B and
-        aarch64 54,272 B, PE32+ subsystem 11, clippy -D warnings clean
-        (#2, the one dead-code error, fixed there)
-  - [ ] QEMU/OVMF igb (`sc-build scripts/test-ovmf.sh`)
-  - [ ] stormbootx: issue to pin it in build-nic-drivers.sh
-        (`prefer_media_drivers = igb`); #1 proposed `--after` it
+  - [x] Host tests: `sc-build scripts/test-host.sh` at 1d5b3d2, 46 pass
+        (igb 29, snp 14, trace 3)
+  - [x] `sc-build scripts/check-driver.sh` at 1d5b3d2: x86_64 59,904 B
+        (sha256 408c7e66…786b0) and aarch64 56,320 B, PE32+ subsystem 11,
+        clippy -D warnings clean (#2, a dead-code error, fixed in 31e6bdf)
+  - [x] QEMU/OVMF igb (`sc-build scripts/test-ovmf.sh`) at 1d5b3d2, QEMU
+        10.2.2: both boots PASS (lease 10.0.2.15, ping 5/5, UDP echo 1200 B).
+        Two QEMU-model findings fixed on the way (#3): STATUS.LU comes back
+        only after an autonegotiation (98ea20f `relink`), and receive
+        descriptors are written in the advanced format only (1d5b3d2)
+  - [ ] stormbootx: pin 1d5b3d2 in build-nic-drivers.sh (asked on
+        stormbootx#69); #1 proposed `--after` it
+  - [ ] Later, not blocking: a real I350/I210/82576 (none in the lab,
+        2026-11-07); the relink path was only seen on QEMU

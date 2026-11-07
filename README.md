@@ -11,8 +11,9 @@ stormnic-realtek.
 Hardware facts from Intel's public datasheets (see NOTICE and
 docs/hardware.md), the binding and SNP from the UEFI specification. MIT.
 
-Status: v0.1.0. Verified against a simulated controller and end to end
-under OVMF with QEMU's `igb` device (an emulated 82576, `scripts/test-ovmf.sh`).
+Status: v0.1.0. Verified against a simulated controller (46 tests) and end
+to end under OVMF with QEMU 10.2's `igb` device (an emulated 82576,
+`scripts/test-ovmf.sh`: DHCP lease, 5/5 pings, 1200-byte UDP echo).
 No machine in the lab has an igb part yet, so it has not run on real
 silicon. Not yet pinned in stormbootx's `build-nic-drivers.sh`.
 
