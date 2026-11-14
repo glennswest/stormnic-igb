@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### 2026-11-13
+- **feat:** the stormnic contract (#5): the driver owns its port's bring-up
+  (PHY powered and autonegotiating, link, the IEEE standard FEC for the
+  media and speed: none for every igb media/speed, `igb::standard_fec`) and
+  prints one line per port: driver, PCI address, PCI ID, part, LAN function,
+  MAC, media, speed, FEC, link. A port without link is an `error:` line.
+  The old per-NIC line's flow-control/SNP details moved to the trace.
+
 ## [v0.1.0] — 2026-11-07
 
 ### Fixed

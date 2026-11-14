@@ -77,6 +77,15 @@ PHY register touched is BMCR (0): if it has power-down (11) or isolate (10)
 set, or autonegotiation enable (12) clear, it is rewritten without them and
 with autonegotiation restarted (9).
 
+## FEC
+
+The family runs 10BASE-T, 100BASE-TX and 1000BASE-T on its internal PHY,
+1000BASE-X over SerDes, 1000BASE-KX on a backplane, SGMII to an external
+PHY, and (I354) 2500BASE-KX. IEEE 802.3 defines no forward error correction
+for any of them, and the MAC has no FEC block, so the standard FEC for
+every igb port is none (`igb::standard_fec`) and the per-port line says
+`FEC none` (stormnic-igb#5). Nothing about FEC is configured or handed down.
+
 ## Descriptors (16 bytes)
 
 Receive, advanced one-buffer format. The driver writes the packet buffer

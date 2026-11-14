@@ -375,3 +375,42 @@ fn no_cable_is_not_renegotiated() {
     assert_eq!(r.bmsr.map(|b| b & igb::BMSR_LINK), Some(0));
     assert!(d.now - t < 100_000, "waited {} us", d.now - t);
 }
+
+#[test]
+fn the_standard_fec_is_none_for_every_media_and_speed() {
+    for media in [Media::Copper, Media::Kx, Media::Sgmii, Media::Serdes] {
+        for mbps in [0, 10, 100, 1000, 2500] {
+            assert_eq!(igb::standard_fec(media, mbps), igb::Fec::None);
+        }
+    }
+}
+
+fn port_line(link: Link, waited_ms: u32) -> String {
+    format!(
+        "{}",
+        igb::PortLine {
+            version: "0.2.0", at: "0000:00:03.0", device: 0x10c9, part: "82576", func: 1,
+            mac: MAC, media: Media::Copper, link, waited_ms,
+        }
+    )
+}
+
+#[test]
+fn the_port_line_names_driver_address_mac_media_speed_fec_and_link() {
+    let l = port_line(Link { up: true, mbps: 1000, full_duplex: true }, 2000);
+    let m = MAC;
+    let mac = format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", m[0], m[1], m[2], m[3], m[4], m[5]);
+    assert_eq!(
+        l,
+        format!("stormnic-igb 0.2.0: 0000:00:03.0 8086:10c9 82576 port 1: MAC {mac}, media copper, speed 1000 Mb/s full duplex, FEC none, link UP")
+    );
+    assert!(!l.contains("error"));
+}
+
+#[test]
+fn a_port_without_link_is_an_error_line() {
+    let l = port_line(Link::default(), 5000);
+    assert!(l.ends_with("speed none, FEC none, link DOWN: error: no link after 5000 ms of autonegotiation (check the cable and the link partner)"), "{l}");
+    let l = port_line(Link::default(), 0);
+    assert!(l.contains("link DOWN: error: no link (down before the MAC reset too"), "{l}");
+}

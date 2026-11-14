@@ -14,7 +14,7 @@
 # Two boots: `quiet` (the default console: the driver's one line) and
 # `verbose` (StormnicVerbose set by the check image, so the whole bring-up
 # trace is printed: the MAC reset, PHY, DMA check). Each must print
-# `STORMNIC-IGB CHECK PASS` and the driver's one console line.
+# `STORMNIC-IGB CHECK PASS` and the driver's per-port line (FEC none, link UP).
 #
 # Needs qemu-system-x86_64 with the igb device, OVMF, python3, mkfs.fat,
 # mtools. KVM when /dev/kvm is writable, TCG otherwise.
@@ -67,7 +67,11 @@ boot() {
         -serial file:"$log" -monitor none -display none </dev/null >/dev/null 2>&1 || true
     sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' "$log" | tr -d '\r' | grep -E '^(stormnic-igb|check:|STORMNIC-IGB)' || true
     if ! grep -q 'STORMNIC-IGB CHECK PASS' "$log"; then say "$name: FAIL: no PASS line"; failed+=("$name"); return; fi
-    if ! grep -q "stormnic-igb [0-9.]*: .*8086:10c9 .*SNP installed" "$log"; then say "$name: FAIL: no driver line for 8086:10c9"; failed+=("$name"); return; fi
+    # The per-port line of the stormnic contract (#5): address, MAC, media,
+    # speed, the standard FEC (none at 1G) and link UP.
+    if ! grep -qE "stormnic-igb [0-9.]+: [0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f] 8086:10c9 82576 port [0-9]: MAC ([0-9a-f]{2}:){5}[0-9a-f]{2}, media copper, speed 1000 Mb/s full duplex, FEC none, link UP" "$log"; then
+        say "$name: FAIL: no per-port line for 8086:10c9 with FEC none and link UP"; failed+=("$name"); return
+    fi
     say "$name: PASS"
 }
 # Both boots run whatever the first does, so a failure still shows the

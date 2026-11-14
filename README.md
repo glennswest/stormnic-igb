@@ -64,8 +64,17 @@ stormbootx takes the NIC from it with `prefer_media_drivers = igb`.
 - **Flow control is off**: CTRL.TFCE/RFCE clear, XON/XOFF thresholds zero,
   and a full receive ring drops (SRRCTL.DROP_EN) instead of sending pause
   frames to the switch.
-- **Console**: one line per NIC, e.g.
-  `stormnic-igb 0.1.0: 0000:00:02.0 8086:10c9 82576 (82576, copper): MAC 52:54:00:12:34:56, link up 1000 Mb/s full duplex, flow control off, SNP installed`,
+- **Console**: one line per port, the stormnic contract's (#5): driver and
+  version, PCI address, PCI ID, part, LAN function, MAC, media, speed, FEC
+  and link, e.g.
+  `stormnic-igb 0.2.0: 0000:00:02.0 8086:10c9 82576 port 0: MAC 52:54:00:12:34:56, media copper, speed 1000 Mb/s full duplex, FEC none, link UP`.
+  A port without link is an error line:
+  `…, speed none, FEC none, link DOWN: error: no link after 5000 ms of autonegotiation (check the cable and the link partner)`.
+- **FEC**: the driver applies the IEEE 802.3 standard FEC for the port's
+  media and speed itself (`igb::standard_fec`); nothing is handed down by the
+  loader. Every speed and media of this family (10/100/1000BASE-T,
+  1000BASE-X SerDes, 1000BASE-KX, SGMII, the I354's 2500BASE-KX) has no FEC
+  in 802.3, so it is always `none`, and the line says so.
   plus warnings. The whole bring-up trace is printed when the volatile EFI
   variable `StormnicVerbose` (GUID `ce1479a2-eab9-4176-b0ad-c909ea5b8e0b`,
   shared by the stormnic drivers) is set, or with `--features verbose`; a

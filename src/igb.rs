@@ -272,6 +272,73 @@ impl core::fmt::Display for Link {
     }
 }
 
+/// Forward error correction on the line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fec {
+    /// No FEC: the standard for every speed and media this family runs.
+    None,
+}
+
+impl Fec {
+    pub fn name(self) -> &'static str {
+        match self {
+            Fec::None => "none",
+        }
+    }
+}
+
+/// The IEEE 802.3 FEC for a port's media and speed (the stormnic contract,
+/// stormnic-igb#5: the driver applies the standard itself, nothing is
+/// handed down). Every PHY this family drives, 10BASE-T, 100BASE-TX,
+/// 1000BASE-T, 1000BASE-X over SerDes, 1000BASE-KX and SGMII (and the
+/// I354's 2500BASE-KX), has no FEC in 802.3, so the standard is none. The
+/// MAC has no FEC block to configure either: "none" is what runs.
+pub fn standard_fec(_media: Media, _mbps: u32) -> Fec {
+    Fec::None
+}
+
+/// The one line a port reports at bind: driver, PCI address, PCI ID, part,
+/// LAN function, MAC address, media, speed, FEC and link. A port whose link
+/// did not come up is an `error:` line, never a quiet one.
+pub struct PortLine<'a, A: core::fmt::Display> {
+    pub version: &'a str,
+    pub at: A,
+    pub device: u16,
+    pub part: &'a str,
+    pub func: u32,
+    pub mac: [u8; 6],
+    pub media: Media,
+    pub link: Link,
+    /// How long Start waited for the link, for the error line.
+    pub waited_ms: u32,
+}
+
+impl<A: core::fmt::Display> core::fmt::Display for PortLine<'_, A> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let m = self.mac;
+        write!(
+            f,
+            "stormnic-igb {}: {} 8086:{:04x} {} port {}: MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}, media {}, ",
+            self.version, self.at, self.device, self.part, self.func, m[0], m[1], m[2], m[3], m[4], m[5], self.media.name()
+        )?;
+        let fec = standard_fec(self.media, self.link.mbps).name();
+        if self.link.up {
+            write!(
+                f,
+                "speed {} Mb/s {}, FEC {fec}, link UP",
+                self.link.mbps,
+                if self.link.full_duplex { "full duplex" } else { "half duplex" }
+            )
+        } else {
+            write!(f, "speed none, FEC {fec}, link DOWN: error: no link")?;
+            match self.waited_ms {
+                0 => f.write_str(" (down before the MAC reset too; check the cable and the link partner)"),
+                ms => write!(f, " after {ms} ms of autonegotiation (check the cable and the link partner)"),
+            }
+        }
+    }
+}
+
 /// What `identify` reads without changing anything.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Identity {
