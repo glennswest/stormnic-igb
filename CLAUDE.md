@@ -99,3 +99,6 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
         speed 1000 Mb/s full duplex, FEC none, link UP`
   - [ ] Later: stormbootx's pin (build-nic-drivers.sh) moves to v0.2.0 —
         its own work; a real igb card when one is in the lab
+- [ ] #6 Device IDs against Linux's `igb_pci_tbl`: DH89xxCC (0438, 043a,
+      043c, 0440) missing here; 10e2, 1509, 1534, 1535, 15f6 to check
+      against the datasheets (stormbootx#202); open, P2

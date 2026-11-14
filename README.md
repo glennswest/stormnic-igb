@@ -11,11 +11,13 @@ stormnic-realtek.
 Hardware facts from Intel's public datasheets (see NOTICE and
 docs/hardware.md), the binding and SNP from the UEFI specification. MIT.
 
-Status: v0.1.0. Verified against a simulated controller (46 tests) and end
+Status: v0.2.0. Verified against a simulated controller (`test/`) and end
 to end under OVMF with QEMU 10.2's `igb` device (an emulated 82576,
 `scripts/test-ovmf.sh`: DHCP lease, 5/5 pings, 1200-byte UDP echo).
 No machine in the lab has an igb part yet, so it has not run on real
-silicon. Not yet pinned in stormbootx's `build-nic-drivers.sh`.
+silicon. stormbootx pins v0.1.0 (80c9ea5) in `build-nic-drivers.sh`; moving
+the pin to v0.2.0 is stormbootx's work. Open: #6, the device-ID list against
+Linux's `igb_pci_tbl` (DH89xxCC 0438/043a/043c/0440 are not bound yet).
 
 ## What it binds
 
@@ -75,7 +77,8 @@ stormbootx takes the NIC from it with `prefer_media_drivers = igb`.
   loader. Every speed and media of this family (10/100/1000BASE-T,
   1000BASE-X SerDes, 1000BASE-KX, SGMII, the I354's 2500BASE-KX) has no FEC
   in 802.3, so it is always `none`, and the line says so.
-  plus warnings. The whole bring-up trace is printed when the volatile EFI
+  The default console is that one line per port (plus warnings and errors).
+  The whole bring-up trace is printed when the volatile EFI
   variable `StormnicVerbose` (GUID `ce1479a2-eab9-4176-b0ad-c909ea5b8e0b`,
   shared by the stormnic drivers) is set, or with `--features verbose`; a
   failure replays the last 16 trace lines first.

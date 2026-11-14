@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### 2026-11-14
+- **docs:** README status brought to v0.2.0 (stormbootx pin, open #6), a
+  garbled console paragraph repaired; CLAUDE.md work plan notes #6.
+
 ## [v0.2.0] — 2026-11-13
 
 ### Added
