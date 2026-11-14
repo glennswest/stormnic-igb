@@ -2,8 +2,10 @@
 
 ## [Unreleased]
 
-### 2026-11-13
-- **feat:** the stormnic contract (#5): the driver owns its port's bring-up
+## [v0.2.0] — 2026-11-13
+
+### Added
+- The stormnic contract (#5): the driver owns its port's bring-up
   (PHY powered and autonegotiating, link, the IEEE standard FEC for the
   media and speed: none for every igb media/speed, `igb::standard_fec`) and
   prints one line per port: driver, PCI address, PCI ID, part, LAN function,
