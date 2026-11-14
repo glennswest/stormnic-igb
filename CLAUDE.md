@@ -85,3 +85,11 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
         on stormbootx#69 (its own work, released by closing #1)
   - [ ] Later, not blocking: a real I350/I210/82576 (none in the lab,
         2026-11-07); the relink path was only seen on QEMU
+- [ ] #5 The stormnic contract: the driver brings its port up itself
+      (speed, link, the IEEE standard FEC for media/speed) and reports one
+      line per port: driver, PCI address, MAC, media, speed, FEC, link
+  - [ ] `igb::standard_fec` (none for every igb media/speed: 802.3 defines
+        no FEC for 10/100/1000BASE-T, 1000BASE-X/KX, SGMII, 2500BASE-KX)
+        and `igb::PortLine`, host-tested
+  - [ ] binding prints the PortLine; link down is an `error:` line
+  - [ ] test-ovmf checks the line (`FEC none`, `link UP`); v0.2.0
