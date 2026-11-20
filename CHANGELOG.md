@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### 2026-11-20
+- **fix:** SNP transmit completion (#9). GetStatus handed a token back as
+  soon as one was queued, before the controller had written DD into its
+  descriptor (finding b78ceb3a5cda); each token now carries its descriptor's
+  sequence number and comes back only once the descriptor is retired, and
+  TRANSMIT_INTERRUPT is reported when that completion is first seen. Reset
+  and Initialize rewrote the transmit ring but kept the queue and the
+  interrupt flag (finding a2e462520655): frames a ring reset discards are
+  now marked aborted, handed back by GetStatus (the caller's buffer was
+  never used for DMA) with no transmit interrupt pending; Stop and
+  ExitBootServices drop the queue. A relink error in Initialize or Reset
+  left RX, TX and DMA running with the interface reported failed (finding
+  e6874a9b956a): the NIC is quiesced and the interface is Started. Host
+  tests in `test/snp.rs`; the simulator can hold transmit descriptors.
 - **fix:** A NIC that would not quiesce (a failed MAC reset or quiesce in
   Start, an SNP that could not be uninstalled, a binding Stop whose quiesce
   failed) had bus mastering cleared and then the original PCI attributes put

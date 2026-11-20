@@ -14,8 +14,16 @@
 //! The NIC runs only between Initialize and Shutdown/Stop (or halt, at
 //! ExitBootServices): every other state has it quiesced.
 //!
-//! Transmit copies the frame into a ring buffer, so the caller's buffer is
-//! free at once; it is queued for GetStatus to hand back, as the spec asks.
+//! Transmit copies the frame into a ring buffer; its token is queued for
+//! GetStatus to hand back once the controller has written DD into its
+//! descriptor (finding b78ceb3a5cda), and TRANSMIT_INTERRUPT is reported
+//! when such a completion is first seen. Every ring reset (Initialize,
+//! Reset, a re-Initialize) discards the frames still in flight: their
+//! tokens are marked aborted and handed back by GetStatus like completed
+//! ones, since the caller's buffer was never used for DMA, and the transmit
+//! interrupt is cleared (the spec's "queues emptied, pending interrupts
+//! cleared"; finding a2e462520655). Stop and halt drop the queue: a
+//! stopped interface has no client to hand tokens to.
 
 use super::ring::{Net, MAX_FRAME, MIN_FRAME};
 use super::{Bus, Error, Link};
@@ -92,12 +100,20 @@ pub struct Snp {
     pub media: bool,
     /// The last link state read.
     pub link: Link,
-    /// A frame went out since the last GetStatus.
-    transmitted: bool,
-    /// Caller buffers (as addresses) for GetStatus, oldest at `head`.
-    recycle: [usize; RECYCLE],
+    /// Caller buffers for GetStatus, oldest at `head`.
+    recycle: [Sent; RECYCLE],
     head: usize,
     queued: usize,
+    /// Entries from `head` already reported done by TRANSMIT_INTERRUPT.
+    reported: usize,
+}
+
+/// A transmitted frame's token (the caller's buffer, as an address) and its
+/// `Net::tx_seq`; None when a ring reset discarded the frame.
+#[derive(Clone, Copy, Debug)]
+struct Sent {
+    token: usize,
+    seq: Option<usize>,
 }
 
 /// `EFI_SIMPLE_NETWORK_PROTOCOL.MCastIpToMac`: IPv4 224.0.0.0/4 maps to
@@ -119,7 +135,7 @@ impl Snp {
         Snp {
             net, state: State::Stopped, permanent: mac, current: mac,
             setting: 0, mcast: [[0; 6]; MAX_MCAST], mcast_count: 0, media: link.up, link,
-            transmitted: false, recycle: [0; RECYCLE], head: 0, queued: 0,
+            recycle: [Sent { token: 0, seq: None }; RECYCLE], head: 0, queued: 0, reported: 0,
         }
     }
 
@@ -146,6 +162,7 @@ impl Snp {
             State::Initialized => self.shutdown(b)?,
             State::Started => {}
         }
+        self.drop_queue();
         self.state = State::Stopped;
         Ok(())
     }
@@ -186,14 +203,27 @@ impl Snp {
     /// side of the link (not the PHY's): if it was up, wait up to 1 s for
     /// it to come back, so Mode shows the media present (`relink` restarts
     /// autonegotiation if the MAC does not see the PHY's link again).
+    /// On any failure the NIC is quiesced and the interface is Started.
     fn run<B: Bus>(&mut self, b: &mut B) -> F<(), B::Error> {
         let promiscuous = self.setting & PROMISCUOUS != 0;
+        // `start` rewrites the transmit ring: what was in flight is gone.
+        self.abort_queue();
         if let Err(e) = self.net.start(b, promiscuous) {
             // `start` quiesced the controller again; nothing runs.
             self.state = State::Started;
             return Err(e.into());
         }
-        let r = super::relink(b, self.net.func, self.net.media, if self.link.up { 1000 } else { 0 })?;
+        let r = match super::relink(b, self.net.func, self.net.media, if self.link.up { 1000 } else { 0 }) {
+            Ok(r) => r,
+            Err(e) => {
+                // RX, TX and DMA are on since `start` (finding e6874a9b956a).
+                // A quiesce that fails here is caught again where the DMA
+                // region would be freed (binding Stop keeps it on failure).
+                let _ = self.net.stop(b);
+                self.state = State::Started;
+                return Err(e.into());
+            }
+        };
         self.link = r.link;
         self.media = self.link.up;
         Ok(())
@@ -284,10 +314,10 @@ impl Snp {
         }
         if buf.len() < MIN_FRAME { return Err(Fail::BufferTooSmall(MIN_FRAME)); }
         if self.queued == RECYCLE { return Err(Fail::NotReady); }
+        let seq = self.net.tx_seq();
         if !self.net.transmit(b, buf)? { return Err(Fail::NotReady); }
-        self.recycle[(self.head + self.queued) % RECYCLE] = token;
+        self.recycle[(self.head + self.queued) % RECYCLE] = Sent { token, seq: Some(seq) };
         self.queued += 1;
-        self.transmitted = true;
         Ok(())
     }
 
@@ -306,8 +336,9 @@ impl Snp {
     }
 
     /// GetStatus: interrupt bits (RECEIVE when a frame is waiting, TRANSMIT
-    /// when one went out since the last call), the link into `media`, and
-    /// with `recycle` the oldest transmitted buffer not yet handed back.
+    /// when a transmit completed since the last call), the link into
+    /// `media`, and with `recycle` the oldest buffer whose frame the
+    /// controller is done with (or a reset discarded), not yet handed back.
     pub fn get_status<B: Bus>(&mut self, b: &mut B, recycle: bool) -> F<(u32, Option<usize>), B::Error> {
         self.initialized()?;
         self.net.reclaim();
@@ -315,14 +346,39 @@ impl Snp {
         self.media = self.link.up;
         let mut bits = 0;
         if self.next_accepted(b)?.is_some() { bits |= RECEIVE_INTERRUPT; }
-        if core::mem::take(&mut self.transmitted) { bits |= TRANSMIT_INTERRUPT; }
-        let token = (recycle && self.queued > 0).then(|| {
-            let t = self.recycle[self.head];
+        let done = self.done();
+        if done > self.reported { bits |= TRANSMIT_INTERRUPT; }
+        self.reported = done;
+        let token = (recycle && done > 0).then(|| {
+            let t = self.recycle[self.head].token;
             self.head = (self.head + 1) % RECYCLE;
             self.queued -= 1;
+            self.reported -= 1;
             t
         });
         Ok((bits, token))
+    }
+
+    /// Queued entries from `head` that are done: completed (the controller
+    /// completes in ring order) or aborted (all older than any live one).
+    fn done(&self) -> usize {
+        (0..self.queued)
+            .take_while(|k| self.recycle[(self.head + k) % RECYCLE].seq.is_none_or(|s| self.net.tx_done(s)))
+            .count()
+    }
+
+    /// The transmit ring is about to be reset: every queued frame is
+    /// discarded, its token free to hand back, with no interrupt pending.
+    fn abort_queue(&mut self) {
+        for k in 0..self.queued { self.recycle[(self.head + k) % RECYCLE].seq = None; }
+        self.reported = self.queued;
+    }
+
+    /// No client any more: forget every queued token.
+    fn drop_queue(&mut self) {
+        self.head = 0;
+        self.queued = 0;
+        self.reported = 0;
     }
 
     /// ExitBootServices (and every exit path): quiesce the NIC whatever the
@@ -330,6 +386,7 @@ impl Snp {
     /// never initialized, so a controller some earlier stage left running stops.
     pub fn halt<B: Bus>(&mut self, b: &mut B) -> Result<(), Error<B::Error>> {
         self.state = State::Stopped;
+        self.drop_queue();
         self.net.stop(b)
     }
 }

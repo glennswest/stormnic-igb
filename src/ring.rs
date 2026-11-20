@@ -215,6 +215,14 @@ impl Net {
     /// Transmit descriptors the controller still owns.
     pub fn tx_pending(&self) -> usize { self.tx_prod.wrapping_sub(self.tx_cons) }
 
+    /// The sequence number the next `transmit` gives its frame (counted
+    /// from 0 at every `start`, which discards what was in flight).
+    pub fn tx_seq(&self) -> usize { self.tx_prod }
+
+    /// The frame `transmit` sent as `seq` since the last `start` has been
+    /// retired by `reclaim`: the controller wrote DD into its descriptor.
+    pub fn tx_done(&self, seq: usize) -> bool { self.tx_prod.wrapping_sub(seq) > self.tx_pending() }
+
     /// Retire the transmit descriptors the controller has written DD into.
     pub fn reclaim(&mut self) {
         while self.tx_pending() > 0 {

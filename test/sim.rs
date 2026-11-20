@@ -55,6 +55,9 @@ pub struct Dev {
     rx_head: u32,
     pub wire: Vec<Vec<u8>>,
     pub loopback: bool,
+    /// The transmitter holds its descriptors (as with no link) until
+    /// `resume_tx`: DD is not written back.
+    pub tx_paused: bool,
     pub dropped: usize,
     /// Every register write as (offset, value).
     pub ops: Vec<(u32, u32)>,
@@ -89,6 +92,7 @@ impl Dev {
             rx_head: 0,
             wire: Vec::new(),
             loopback: false,
+            tx_paused: false,
             dropped: 0,
             ops: Vec::new(),
         };
@@ -235,7 +239,7 @@ impl Dev {
 
     /// TDT moved: send every descriptor from the head up to the tail.
     fn transmit(&mut self) {
-        if !self.tx_enabled() { return; }
+        if !self.tx_enabled() || self.tx_paused { return; }
         let ring = self.tx_ring();
         let n = self.tx_count();
         while self.tx_head != self.get(igb::TDT) {
@@ -255,6 +259,12 @@ impl Dev {
             if self.loopback { self.deliver(&f); }
             self.wire.push(f);
         }
+    }
+
+    /// Let a paused transmitter send what it holds.
+    pub fn resume_tx(&mut self) {
+        self.tx_paused = false;
+        self.transmit();
     }
 
     /// A frame from the network (the MAC strips the CRC: RCTL.SECRC).

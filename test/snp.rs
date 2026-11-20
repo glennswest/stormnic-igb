@@ -216,3 +216,108 @@ fn initialize_on_qemu_s_model_renegotiates_and_has_media() {
     assert!(s.media, "{}", s.link);
     assert_eq!(d.an_restarts, 1);
 }
+
+fn send(d: &mut Dev, s: &mut Snp, token: usize) -> R<()> {
+    let mut f = frame_to(OTHER, token as u8);
+    s.transmit(d, 0, &mut f, None, None, None, token)
+}
+
+#[test]
+fn get_status_hands_a_buffer_back_only_after_the_nic_completed_it() {
+    // Finding b78ceb3a5cda.
+    let (mut d, mut s) = up();
+    d.tx_paused = true;
+    send(&mut d, &mut s, 0x1000).unwrap();
+    send(&mut d, &mut s, 0x2000).unwrap();
+    assert_eq!(s.get_status(&mut d, true).unwrap(), (0, None), "the NIC still owns both descriptors");
+    d.resume_tx();
+    assert_eq!(d.wire.len(), 2);
+    assert_eq!(s.get_status(&mut d, false).unwrap(), (snp::TRANSMIT_INTERRUPT, None), "completion shows once");
+    assert_eq!(s.get_status(&mut d, true).unwrap(), (0, Some(0x1000)));
+    assert_eq!(s.get_status(&mut d, true).unwrap(), (0, Some(0x2000)));
+    assert_eq!(s.get_status(&mut d, true).unwrap(), (0, None));
+}
+
+#[test]
+fn a_reset_hands_back_the_frames_it_discarded_and_clears_the_interrupt() {
+    // Finding a2e462520655: Reset and a re-Initialize rewrite the ring.
+    for reinit in [false, true] {
+        let (mut d, mut s) = up();
+        d.tx_paused = true;
+        send(&mut d, &mut s, 0x1000).unwrap();
+        send(&mut d, &mut s, 0x2000).unwrap();
+        if reinit { s.initialize(&mut d).unwrap(); } else { s.reset(&mut d).unwrap(); }
+        d.resume_tx();
+        assert!(d.wire.is_empty(), "the reset discarded both frames");
+        // A new frame after the reset: sequence numbers start again at 0.
+        send(&mut d, &mut s, 0x3000).unwrap();
+        assert_eq!(d.wire.len(), 1);
+        let (bits, t) = s.get_status(&mut d, true).unwrap();
+        assert_eq!((bits & snp::TRANSMIT_INTERRUPT, t), (snp::TRANSMIT_INTERRUPT, Some(0x1000)), "reinit {reinit}");
+        assert_eq!(s.get_status(&mut d, true).unwrap().1, Some(0x2000));
+        assert_eq!(s.get_status(&mut d, true).unwrap(), (0, Some(0x3000)));
+        assert_eq!(s.get_status(&mut d, true).unwrap(), (0, None));
+    }
+}
+
+#[test]
+fn a_reset_with_only_discarded_frames_raises_no_transmit_interrupt() {
+    let (mut d, mut s) = up();
+    d.tx_paused = true;
+    send(&mut d, &mut s, 0x1000).unwrap();
+    s.reset(&mut d).unwrap();
+    assert_eq!(s.get_status(&mut d, false).unwrap(), (0, None));
+    assert_eq!(s.get_status(&mut d, true).unwrap(), (0, Some(0x1000)));
+}
+
+#[test]
+fn many_resets_never_fill_the_recycle_queue() {
+    // Finding a2e462520655: tokens a reset discarded must not pile up.
+    let (mut d, mut s) = up();
+    d.tx_paused = true;
+    for i in 0..(snp::RECYCLE * 3) {
+        send(&mut d, &mut s, i).unwrap();
+        s.reset(&mut d).unwrap();
+        assert_eq!(s.get_status(&mut d, true).unwrap().1, Some(i), "reset {i}");
+    }
+    d.tx_paused = false;
+    send(&mut d, &mut s, 0x9000).unwrap();
+    assert_eq!(s.get_status(&mut d, true).unwrap().1, Some(0x9000));
+}
+
+#[test]
+fn stop_forgets_the_queued_buffers() {
+    let (mut d, mut s) = up();
+    d.tx_paused = true;
+    send(&mut d, &mut s, 0x1000).unwrap();
+    s.stop(&mut d).unwrap();
+    s.start::<()>().unwrap();
+    s.initialize(&mut d).unwrap();
+    assert_eq!(s.get_status(&mut d, true).unwrap(), (0, None), "a new client gets no old tokens");
+}
+
+#[test]
+fn a_relink_error_quiesces_the_nic_and_leaves_it_started() {
+    // Finding e6874a9b956a: STATUS.LU stays down (QEMU's model) and the PHY
+    // read relink makes fails, after `start` turned RX, TX and DMA on.
+    for during_reset in [false, true] {
+        let (mut d, mut s) = snp();
+        s.start::<()>().unwrap();
+        if during_reset { s.initialize(&mut d).unwrap(); }
+        d.qemu_relink = true;
+        d.mdic_stuck = true;
+        let resets = d.resets;
+        let r = if during_reset { s.reset(&mut d) } else { s.initialize(&mut d) };
+        assert!(matches!(r, Err(Fail::Device(_))), "{r:?}");
+        assert_eq!(s.state, State::Started, "reset {during_reset}");
+        assert!(!d.rx_enabled() && !d.tx_enabled(), "the NIC still runs after a failed {}",
+            if during_reset { "Reset" } else { "Initialize" });
+        assert!(d.resets >= resets + 2, "start's reset and the quiesce's");
+        assert!(!s.net.running);
+        assert_eq!(s.shutdown(&mut d), Err(Fail::NotInitialized));
+        // And it comes up again once the PHY answers.
+        d.mdic_stuck = false;
+        s.initialize(&mut d).unwrap();
+        assert!(d.rx_enabled() && d.tx_enabled());
+    }
+}
