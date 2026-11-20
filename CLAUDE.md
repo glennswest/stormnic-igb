@@ -102,3 +102,8 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
 - [ ] #6 Device IDs against Linux's `igb_pci_tbl`: DH89xxCC (0438, 043a,
       043c, 0440) missing here; 10e2, 1509, 1534, 1535, 15f6 to check
       against the datasheets (stormbootx#202); open, P2
+- [ ] #7 Review finding ec68cd8a67bf (critical): failure cleanup after a
+      failed quiesce put the original PCI attributes back and could turn
+      bus mastering on again. `decode::abandon` keeps BME off; host tests in
+      `test/decode.rs`. The four majors (e6874a9b956a, a2e462520655,
+      b78ceb3a5cda, bf153eab9dc0) follow as P1 once this is in

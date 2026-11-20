@@ -16,7 +16,11 @@
 //!    write-1-to-clear bits) and read back. Only if they are still clear
 //!    does Start fail.
 //!
-//! `release` undoes exactly what `enable` did.
+//! `release` undoes exactly what `enable` did. `abandon` is for a NIC that
+//! would not quiesce (#7, finding ec68cd8a67bf): it undoes the rest but
+//! leaves bus mastering off whatever the original attributes said, since
+//! putting back an original with BUS_MASTER set would let the abandoned NIC
+//! DMA again into a region the driver can no longer vouch for.
 
 /// `EFI_PCI_IO_ATTRIBUTE_MEMORY`.
 pub const ATTRIBUTE_MEMORY: u64 = 0x0002;
@@ -125,6 +129,27 @@ pub fn release<P: Pci>(pci: &P, e: &Enabled<P::Status>) -> Result<(), P::Status>
         }
     }
     r
+}
+
+/// Put the function back as `enable` found it, except that bus mastering
+/// is left off: the attributes go back to the original without
+/// BUS_MASTER, the command register's Memory Space Enable to its state
+/// before `enable`, and then `stop_bus_master` makes sure BME reads back
+/// clear. Ok only if it does; the restore steps' own failures do not
+/// matter as long as BME ends clear.
+pub fn abandon<P: Pci>(pci: &P, e: &Enabled<P::Status>) -> Result<(), Option<P::Status>> {
+    if e.by_attributes != 0 {
+        let _ = match e.original {
+            Ok(original) => pci.set(original & !ATTRIBUTE_BUS_MASTER),
+            Err(_) => pci.disable(e.by_attributes | ATTRIBUTE_BUS_MASTER),
+        };
+    }
+    if let Some(before) = e.command_before {
+        let _ = pci.config_read_u16(COMMAND).and_then(|now| {
+            pci.config_write_u16(COMMAND, (now & !COMMAND_WANTED) | (before & COMMAND_MEMORY))
+        });
+    }
+    stop_bus_master(pci)
 }
 
 /// Turn bus mastering off (a NIC whose queues would not stop): `Disable`,

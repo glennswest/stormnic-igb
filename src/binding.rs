@@ -315,8 +315,12 @@ impl IgbDriver {
         );
         let (dma, net, link, waited_ms) = match dma_up(&pci, &at, dev, &id) {
             Ok(r) => r,
-            Err(()) => {
+            Err(Down::Quiesced) => {
                 restore(&pci, &attributes);
+                return Err(Status::DEVICE_ERROR.into());
+            }
+            Err(Down::Running) => {
+                keep_dma(&pci, &at, &attributes);
                 return Err(Status::DEVICE_ERROR.into());
             }
         };
@@ -326,11 +330,11 @@ impl IgbDriver {
             Err((status, in_use)) => {
                 fail!("stormnic-igb: {at} 8086:{dev:04x}: SNP not installed: {status:?}; releasing");
                 if in_use {
-                    keep_dma(&pci, &at);
+                    keep_dma(&pci, &at, &attributes);
                 } else {
                     dma.release(&pci);
+                    restore(&pci, &attributes);
                 }
-                restore(&pci, &attributes);
                 return Err(Status::DEVICE_ERROR.into());
             }
         };
@@ -375,10 +379,12 @@ impl IgbDriver {
         let b = self.bound.swap_remove(i);
         // SAFETY: the child is gone, so nothing else reaches the Port.
         match unsafe { snp::destroy(b.port) } {
-            Ok(()) => b.dma.release(&b.pci),
-            Err(_) => keep_dma(&b.pci, &at(b.location)),
+            Ok(()) => {
+                b.dma.release(&b.pci);
+                restore(&b.pci, &b.decode);
+            }
+            Err(_) => keep_dma(&b.pci, &at(b.location), &b.decode),
         }
-        restore(&b.pci, &b.decode);
         trace!("stormnic-igb: {}: Stop: released", at(b.location));
         Ok(())
     }
@@ -388,10 +394,11 @@ impl IgbDriver {
 /// (the one read before the reset if there is none), map the region, bring
 /// the NIC up once, make sure the PHY is powered and autonegotiating, wait
 /// for the link, run the DMA check when it is up, and quiesce the NIC.
-/// Everything is logged; Err(()) means Start fails (the region is released,
-/// or kept with bus mastering off if the NIC would not quiesce).
+/// Everything is logged; Err means Start fails, and says whether the NIC
+/// is quiet (the region, if any, released) or might still DMA (the region
+/// kept, and the caller must `keep_dma`, never `restore`).
 fn dma_up(pci: &PciIo, at: &impl core::fmt::Display, dev: u16, id: &Identity)
-    -> core::result::Result<(DmaRegion, Net, Link, u32), ()> {
+    -> core::result::Result<(DmaRegion, Net, Link, u32), Down> {
     let mut bars = Bars { pci, bar: BAR };
     let mac = match igb::quiesce(&mut bars).and_then(|r| Ok((r, igb::read_mac(&mut bars)?))) {
         Ok((r, after)) => {
@@ -410,21 +417,20 @@ fn dma_up(pci: &PciIo, at: &impl core::fmt::Display, dev: u16, id: &Identity)
                 }
                 None => {
                     fail!("stormnic-igb: {at} 8086:{dev:04x}: {}; releasing", igb_error(&igb::Error::NoMac));
-                    return Err(());
+                    return Err(Down::Quiesced);
                 }
             }
         }
         Err(e) => {
             fail!("stormnic-igb: {at} 8086:{dev:04x}: {}", igb_error(&e));
-            keep_dma(pci, at);
-            return Err(());
+            return Err(Down::Running);
         }
     };
     let region = match DmaRegion::new(pci) {
         Ok(r) => r,
         Err(e) => {
             fail!("stormnic-igb: {at} 8086:{dev:04x}: DMA region not mapped: {:?}; releasing", e.status());
-            return Err(());
+            return Err(Down::Quiesced);
         }
     };
     // SAFETY: the region is DMA_BYTES (rounded to pages) from AllocateBuffer,
@@ -442,13 +448,14 @@ fn dma_up(pci: &PciIo, at: &impl core::fmt::Display, dev: u16, id: &Identity)
             Err(_) => {
                 region.release(pci);
                 say!("stormnic-igb: {at} 8086:{dev:04x}: NIC quiesced, DMA region released; releasing");
-                Err(())
+                Err(Down::Quiesced)
             }
         },
         Err(e) => {
             fail!("stormnic-igb: {at} 8086:{dev:04x}: quiesce failed: {}", igb_error(&e));
-            keep_dma(pci, at);
-            Err(())
+            // The region stays mapped and allocated (DmaRegion has no
+            // Drop): the NIC might still use it.
+            Err(Down::Running)
         }
     }
 }
@@ -501,11 +508,22 @@ fn bring_up(bars: &mut Bars, net: &mut Net, id: &Identity, at: &impl core::fmt::
     Ok((link, waited_ms))
 }
 
+/// How `dma_up` failed.
+enum Down {
+    /// The NIC is quiet; whatever region there was is released.
+    Quiesced,
+    /// The NIC would not quiesce and might still DMA.
+    Running,
+}
+
 /// The NIC would not quiesce: it might still DMA into the region, so it is
-/// never freed. Bus mastering is turned off at the PCI level instead; the
-/// pages stay allocated until reboot.
-fn keep_dma(pci: &PciIo, at: &impl core::fmt::Display) {
-    let off = decode::stop_bus_master(pci);
+/// never freed. Bus mastering is turned off at the PCI level instead, and
+/// the decode changes Start made are undone *except* bus mastering, which
+/// stays off even if the original attributes had it on (#7, finding
+/// ec68cd8a67bf: `restore` here re-enabled DMA). The pages stay allocated
+/// until reboot. Never followed by `restore`.
+fn keep_dma(pci: &PciIo, at: &impl core::fmt::Display, e: &Enabled<Status>) {
+    let off = decode::abandon(pci, e);
     fail!(
         "stormnic-igb: {at}: could not quiesce the NIC; bus mastering {}, DMA region kept allocated",
         if off.is_ok() { "disabled" } else { "could not be disabled" }

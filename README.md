@@ -58,7 +58,10 @@ stormbootx takes the NIC from it with `prefer_media_drivers = igb`.
   MAC device-path node.
 - **SNP**: only Initialize turns RX/TX on; Shutdown, Stop, binding Stop and
   ExitBootServices quiesce it (receive and transmit off, queues disabled,
-  MAC reset). Polled, one queue (advanced one-buffer receive descriptors,
+  MAC reset). A NIC that will not quiesce keeps its DMA region allocated
+  and is left with bus mastering off: the decode changes Start made are
+  undone except bus mastering, which stays off even if the firmware had it
+  on (#7). Polled, one queue (advanced one-buffer receive descriptors,
   legacy transmit descriptors), 32 + 32 buffers of
   2 KB, frames copied in and out. The controller accepts its address,
   broadcast and all multicast; the SNP receive filters are applied in

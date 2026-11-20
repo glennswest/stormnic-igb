@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 2026-11-20
+- **fix:** A NIC that would not quiesce (a failed MAC reset or quiesce in
+  Start, an SNP that could not be uninstalled, a binding Stop whose quiesce
+  failed) had bus mastering cleared and then the original PCI attributes put
+  back, which turned bus mastering on again when the firmware had it on: the
+  abandoned NIC could DMA into the kept region (#7, finding ec68cd8a67bf).
+  Those paths now use `decode::abandon`: the original attributes without
+  BUS_MASTER, the command register's MSE as before, BME verified clear.
+  Host tests for `decode` (`test/decode.rs`).
+
 ### 2026-11-14
 - **docs:** README status brought to v0.2.0 (stormbootx pin, open #6), a
   garbled console paragraph repaired; CLAUDE.md work plan notes #6.
