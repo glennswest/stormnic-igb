@@ -107,5 +107,8 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
       bus mastering on again. `decode::abandon` keeps BME off (ec7a5b6);
       host tests in `test/decode.rs` (7 pass), check-driver and both
       QEMU igb + OVMF boots pass at ec7a5b6
-  - [ ] Next: the four majors (e6874a9b956a, a2e462520655, b78ceb3a5cda,
+- [x] #8 The same finding ec68cd8a67bf filed again: fixed by ec7a5b6;
+      re-checked at 48a12c4 (every failed-quiesce path is `keep_dma` →
+      `decode::abandon`, never `restore`; host tests pass), closed 2026-11-20
+  - [ ] Next (from #7): the four majors (e6874a9b956a, a2e462520655, b78ceb3a5cda,
         bf153eab9dc0) as P1

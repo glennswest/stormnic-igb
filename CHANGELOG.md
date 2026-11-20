@@ -10,7 +10,9 @@
   abandoned NIC could DMA into the kept region (#7, finding ec68cd8a67bf).
   Those paths now use `decode::abandon`: the original attributes without
   BUS_MASTER, the command register's MSE as before, BME verified clear.
-  Host tests for `decode` (`test/decode.rs`).
+  Host tests for `decode` (`test/decode.rs`). #8 is the same finding filed
+  again; re-checked at 48a12c4 (no quiesce-failure path reaches `restore`,
+  host tests pass) and closed as fixed by ec7a5b6.
 
 ### 2026-11-14
 - **docs:** README status brought to v0.2.0 (stormbootx pin, open #6), a
