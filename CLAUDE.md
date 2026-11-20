@@ -109,6 +109,13 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
       QEMU igb + OVMF boots pass at ec7a5b6
   - [ ] Next: the four majors (e6874a9b956a, a2e462520655, b78ceb3a5cda,
         bf153eab9dc0) as P1
+- [ ] #9 Review findings in `src/snp_core.rs` (P1): a2e462520655 (ring
+      resets leave old tokens queued), b78ceb3a5cda (GetStatus recycles a
+      token before its descriptor has DD), e6874a9b956a (a relink error in
+      Initialize/Reset leaves the NIC running). Plan: per-token transmit
+      sequence (`Net::tx_seq`/`tx_done`), tokens aborted at every ring
+      reset and handed back, TRANSMIT_INTERRUPT when completion shows;
+      `run` quiesces and goes to Started on a relink error; host tests
 - [x] #8 The same finding ec68cd8a67bf filed again: fixed by ec7a5b6;
       re-checked at 48a12c4 (every failed-quiesce path is `keep_dma` →
       `decode::abandon`, never `restore`; host tests pass), closed 2026-11-20
