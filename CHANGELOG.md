@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### 2026-11-20
+- **fix:** The PHY semaphore stayed held when a register access failed
+  (#10, finding bf153eab9dc0): `with_phy` and `take_swsm` returned on a
+  SWSM or SW_FW_SYNC read/write error before giving SWSM back, which could
+  lock firmware or a BMC out of the shared PHY until reset. Every path
+  after SMBI is taken now gives SWSM back before returning the error; a
+  failed write or read-back of the PHY bit clears the bit; the release
+  clears the bit even when SWSM cannot be taken again, and the PHY work's
+  own error is returned over the release's. Host tests in `test/igb.rs`
+  with a simulator that fails one register access.
 - **fix:** SNP transmit completion (#9). GetStatus handed a token back as
   soon as one was queued, before the controller had written DD into its
   descriptor (finding b78ceb3a5cda); each token now carries its descriptor's

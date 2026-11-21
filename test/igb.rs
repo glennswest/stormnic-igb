@@ -204,6 +204,102 @@ fn no_internal_phy_off_copper() {
     assert_eq!(d.phy_locked_accesses + d.phy_unlocked_accesses, 0);
 }
 
+/// phy_up on a powered-down PHY with one register access failing; the
+/// result and the device after it.
+fn phy_up_failing(reg: u32, write: bool, skip: usize) -> (Result<Phy, Error<()>>, Dev) {
+    let mut d = Dev::new();
+    d.phy.insert(igb::MII_BMCR, igb::BMCR_PDOWN);
+    let id = igb::identify(&mut d).unwrap();
+    d.fault = Some(Fault { reg, write, skip });
+    let r = igb::phy_up(&mut d, &id);
+    assert!(d.faulted, "the fault ({reg:#x}, write {write}, skip {skip}) was not reached");
+    (r, d)
+}
+
+// Finding bf153eab9dc0: a register error while SWSM is held gives it back.
+
+#[test]
+fn a_failed_sw_fw_sync_read_while_taking_gives_swsm_back() {
+    let (r, d) = phy_up_failing(igb::SW_FW_SYNC, false, 0);
+    assert_eq!(r, Err(Error::Io(())));
+    assert_eq!(d.get(igb::SWSM), 0, "SWSM left taken");
+    assert_eq!(d.get(igb::SW_FW_SYNC), 0);
+    assert_eq!(d.phy_locked_accesses + d.phy_unlocked_accesses, 0);
+}
+
+#[test]
+fn a_failed_sw_fw_sync_write_while_taking_gives_swsm_back() {
+    let (r, d) = phy_up_failing(igb::SW_FW_SYNC, true, 0);
+    assert_eq!(r, Err(Error::Io(())));
+    assert_eq!(d.get(igb::SWSM), 0, "SWSM left taken");
+    assert_eq!(d.get(igb::SW_FW_SYNC), 0);
+    assert_eq!(d.phy_locked_accesses + d.phy_unlocked_accesses, 0);
+}
+
+#[test]
+fn a_failed_read_back_of_the_phy_bit_clears_it_and_gives_swsm_back() {
+    let (r, d) = phy_up_failing(igb::SW_FW_SYNC, false, 1);
+    assert_eq!(r, Err(Error::Io(())));
+    assert_eq!(d.get(igb::SWSM), 0, "SWSM left taken");
+    assert_eq!(d.get(igb::SW_FW_SYNC), 0, "the PHY bit was written and left set");
+    assert_eq!(d.phy_locked_accesses + d.phy_unlocked_accesses, 0);
+}
+
+#[test]
+fn a_failed_swesmbi_write_or_read_gives_smbi_back() {
+    for (write, skip) in [(true, 0), (false, 1), (false, 2)] {
+        let (r, d) = phy_up_failing(igb::SWSM, write, skip);
+        assert_eq!(r, Err(Error::Io(())), "write {write} skip {skip}");
+        assert_eq!(d.get(igb::SWSM), 0, "SMBI left taken (write {write} skip {skip})");
+        assert_eq!(d.get(igb::SW_FW_SYNC), 0);
+    }
+}
+
+#[test]
+fn a_failed_release_still_gives_swsm_back() {
+    // SW_FW_SYNC reads: the take's two, then the release's clear.
+    let (r, d) = phy_up_failing(igb::SW_FW_SYNC, false, 2);
+    assert_eq!(r, Err(Error::Io(())));
+    assert_eq!(d.get(igb::SWSM), 0, "SWSM left taken");
+    assert_eq!(d.phy[&igb::MII_BMCR], igb::BMCR_ANENABLE, "the PHY work itself was done");
+}
+
+#[test]
+fn the_phy_error_wins_over_a_failed_release_and_the_bit_is_still_cleared() {
+    let mut d = Dev::new();
+    d.mdic_stuck = true;
+    let id = igb::identify(&mut d).unwrap();
+    // SWSM reads: the take's three and its release's one, then the release's take.
+    d.fault = Some(Fault { reg: igb::SWSM, write: false, skip: 4 });
+    assert!(matches!(igb::phy_up(&mut d, &id), Err(Error::Mdic { reg: 0, .. })));
+    assert!(d.faulted);
+    assert_eq!(d.get(igb::SWSM), 0);
+    assert_eq!(d.get(igb::SW_FW_SYNC), 0, "the PHY bit was not given back");
+}
+
+#[test]
+fn no_register_error_on_the_semaphore_leaves_the_phy_touched_without_it() {
+    for reg in [igb::SWSM, igb::SW_FW_SYNC] {
+        for write in [false, true] {
+            for skip in 0..8 {
+                let mut d = Dev::new();
+                d.phy.insert(igb::MII_BMCR, igb::BMCR_PDOWN);
+                let id = igb::identify(&mut d).unwrap();
+                d.fault = Some(Fault { reg, write, skip });
+                let r = igb::phy_up(&mut d, &id);
+                if d.faulted { assert_eq!(r, Err(Error::Io(())), "{reg:#x} {write} {skip}"); } else { assert!(r.is_ok()); }
+                assert_eq!(d.phy_unlocked_accesses, 0, "{reg:#x} {write} {skip}");
+                // Only a failed access of the release's own clear can leave the bit.
+                let own_clear = reg == igb::SW_FW_SYNC && (write, skip) == (false, 2)
+                    || reg == igb::SW_FW_SYNC && (write, skip) == (true, 1);
+                if !own_clear {
+                    assert_eq!(d.get(igb::SW_FW_SYNC), 0, "PHY bit left set: {reg:#x} {write} {skip}");
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn a_stuck_mdic_is_an_error_and_the_semaphore_is_still_given_back() {
     let mut d = Dev::new();

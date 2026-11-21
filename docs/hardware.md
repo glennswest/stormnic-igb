@@ -72,7 +72,11 @@ all multicast, unicast promiscuous on request).
 **PHY** (copper only): take SWSM (SMBI then SWESMBI), check that neither
 software nor firmware holds the port's PHY bit in SW_FW_SYNC, set it, give
 SWSM back; do the MDIC accesses; give the bit back the same way. A BMC
-sharing the port through NC-SI or SMBus uses the same semaphore. The only
+sharing the port through NC-SI or SMBus uses the same semaphore, so a
+register access that fails while SWSM or the bit is held never leaves them
+held: SWSM is given back first and the error returned after (the error of
+the PHY work itself wins over one in the release), and the bit is cleared
+even when SWSM cannot be had again. The only
 PHY register touched is BMCR (0): if it has power-down (11) or isolate (10)
 set, or autonegotiation enable (12) clear, it is rewritten without them and
 with autonegotiation restarted (9).

@@ -61,6 +61,19 @@ pub struct Dev {
     pub dropped: usize,
     /// Every register write as (offset, value).
     pub ops: Vec<(u32, u32)>,
+    /// One register access that fails (PciIo returning an error), once.
+    pub fault: Option<Fault>,
+    /// Whether `fault` has fired.
+    pub faulted: bool,
+}
+
+/// The access to `reg` (a read, or a write) after `skip` such accesses
+/// succeeded returns Err(()) and does nothing.
+#[derive(Clone, Copy, Debug)]
+pub struct Fault {
+    pub reg: u32,
+    pub write: bool,
+    pub skip: usize,
 }
 
 impl Dev {
@@ -95,6 +108,8 @@ impl Dev {
             tx_paused: false,
             dropped: 0,
             ops: Vec::new(),
+            fault: None,
+            faulted: false,
         };
         d.phy.insert(igb::MII_BMCR, BMCR_DEFAULT);
         d.power_on();
@@ -322,7 +337,10 @@ impl Dev {
                 self.put(igb::SWSM, v & (igb::SWSM_SMBI | igb::SWSM_SWESMBI));
             }
             igb::SW_FW_SYNC => {
-                assert!(self.get(igb::SWSM) & igb::SWSM_SWESMBI != 0, "SW_FW_SYNC written without SWSM");
+                // Without SWSM software may only give its own bits back.
+                let sw = self.get(igb::SW_FW_SYNC) & 0xffff;
+                assert!(self.get(igb::SWSM) & igb::SWSM_SWESMBI != 0 || v & 0xffff & !sw == 0,
+                    "SW_FW_SYNC bits taken without SWSM");
                 let fw = self.get(igb::SW_FW_SYNC) & 0xffff_0000;
                 self.put(igb::SW_FW_SYNC, fw | (v & 0xffff));
             }
@@ -357,10 +375,31 @@ impl Dev {
     }
 }
 
+impl Dev {
+    fn fails(&mut self, o: u32, write: bool) -> bool {
+        match &mut self.fault {
+            Some(f) if f.reg == o && f.write == write => {
+                if f.skip > 0 { f.skip -= 1; return false; }
+                self.fault = None;
+                self.faulted = true;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Bus for Dev {
     type Error = ();
-    fn r32(&mut self, o: u32) -> Result<u32, ()> { Ok(self.read(o)) }
-    fn w32(&mut self, o: u32, v: u32) -> Result<(), ()> { self.write(o, v); Ok(()) }
+    fn r32(&mut self, o: u32) -> Result<u32, ()> {
+        if self.fails(o, false) { return Err(()); }
+        Ok(self.read(o))
+    }
+    fn w32(&mut self, o: u32, v: u32) -> Result<(), ()> {
+        if self.fails(o, true) { return Err(()); }
+        self.write(o, v);
+        Ok(())
+    }
     fn delay_us(&mut self, us: usize) { self.now += us as u64; }
 }
 

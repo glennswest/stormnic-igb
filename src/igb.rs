@@ -524,20 +524,39 @@ pub fn set_filter<B: Bus>(b: &mut B, promiscuous: bool) -> R<(), B::Error> {
 
 /// Take SWSM: SMBI (set by the hardware on the read that finds it clear),
 /// then SWESMBI (only sticks when firmware does not hold it). Whether it was
-/// taken; on false nothing is held.
+/// taken; on false nothing is held. Once SMBI is ours, a register error is
+/// returned only after SWSM has been given back (finding bf153eab9dc0).
 fn take_swsm<B: Bus>(b: &mut B) -> R<bool, B::Error> {
     if !wait(b, 200, 50, |b| Ok(b.r32(SWSM)? & SWSM_SMBI == 0))? { return Ok(false); }
+    match take_swesmbi(b) {
+        Ok(true) => Ok(true),
+        Ok(false) => { give_swsm(b)?; Ok(false) }
+        Err(e) => { let _ = give_swsm(b); Err(e) }
+    }
+}
+
+/// SMBI held: try for SWESMBI.
+fn take_swesmbi<B: Bus>(b: &mut B) -> R<bool, B::Error> {
     for _ in 0..200 {
         let v = b.r32(SWSM)?;
         b.w32(SWSM, v | SWSM_SWESMBI)?;
         if b.r32(SWSM)? & SWSM_SWESMBI != 0 { return Ok(true); }
         b.delay_us(50);
     }
-    give_swsm(b)?;
     Ok(false)
 }
 
 fn give_swsm<B: Bus>(b: &mut B) -> R<(), B::Error> { clr32(b, SWSM, SWSM_SMBI | SWSM_SWESMBI) }
+
+/// Run `f` with SWSM held (taken by the caller) and give it back on every
+/// path; `f`'s error wins over the release's.
+fn under_swsm<B: Bus, T>(b: &mut B, f: impl FnOnce(&mut B) -> R<T, B::Error>) -> R<T, B::Error> {
+    let r = f(b);
+    let g = give_swsm(b);
+    let v = r?;
+    g?;
+    Ok(v)
+}
 
 /// Why the PHY was left alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -560,14 +579,17 @@ pub fn with_phy<B: Bus, T>(b: &mut B, func: u32, f: impl FnOnce(&mut B) -> R<T, 
     let mut sync = 0;
     for _ in 0..100 {
         if take_swsm(b)? {
-            sync = b.r32(SW_FW_SYNC)?;
-            if sync & (bit | (bit << SYNC_FW_SHIFT)) == 0 {
-                b.w32(SW_FW_SYNC, sync | bit)?;
-                got = b.r32(SW_FW_SYNC)? & bit != 0;
-                give_swsm(b)?;
-                if got { break; }
-            } else {
-                give_swsm(b)?;
+            let took = take_phy_bit(b, bit, &mut sync);
+            match (took, give_swsm(b)) {
+                (Ok(true), Ok(())) => { got = true; break; }
+                (Ok(false), Ok(())) => {}
+                (Ok(true), Err(e)) => {
+                    // The bit is ours but SWSM would not go back: give the
+                    // bit back too, so firmware is not locked out of the PHY.
+                    let _ = give_phy(b, bit);
+                    return Err(e);
+                }
+                (Err(e), _) | (Ok(false), Err(e)) => return Err(e),
             }
         }
         b.delay_us(5000);
@@ -576,14 +598,33 @@ pub fn with_phy<B: Bus, T>(b: &mut B, func: u32, f: impl FnOnce(&mut B) -> R<T, 
         return Ok(Err(PhySkip::Busy { sync }));
     }
     let r = f(b);
-    // Give the bit back whatever `f` did.
-    if take_swsm(b)? {
-        clr32(b, SW_FW_SYNC, bit)?;
-        give_swsm(b)?;
-    } else {
-        clr32(b, SW_FW_SYNC, bit)?;
+    // Give the bit back whatever `f` did; `f`'s error wins over the release's.
+    let g = give_phy(b, bit);
+    let v = r?;
+    g?;
+    Ok(Ok(v))
+}
+
+/// SWSM held: set this function's bit in SW_FW_SYNC if neither software
+/// nor firmware has it; whether it is now set. On a register error the bit
+/// is cleared again (it may have stuck).
+fn take_phy_bit<B: Bus>(b: &mut B, bit: u32, sync: &mut u32) -> R<bool, B::Error> {
+    *sync = b.r32(SW_FW_SYNC)?;
+    if *sync & (bit | (bit << SYNC_FW_SHIFT)) != 0 { return Ok(false); }
+    let set = b.w32(SW_FW_SYNC, *sync | bit).map_err(Error::from)
+        .and_then(|()| Ok(b.r32(SW_FW_SYNC)? & bit != 0));
+    if set.is_err() { let _ = clr32(b, SW_FW_SYNC, bit); }
+    set
+}
+
+/// Clear this function's bit in SW_FW_SYNC, under SWSM when it can be had
+/// (and without it otherwise, as the bit is ours).
+fn give_phy<B: Bus>(b: &mut B, bit: u32) -> R<(), B::Error> {
+    match take_swsm(b) {
+        Ok(true) => under_swsm(b, |b| clr32(b, SW_FW_SYNC, bit)),
+        Ok(false) => clr32(b, SW_FW_SYNC, bit),
+        Err(e) => { let _ = clr32(b, SW_FW_SYNC, bit); Err(e) }
     }
-    r.map(Ok)
 }
 
 /// One MDIC access to the internal PHY; the data read.

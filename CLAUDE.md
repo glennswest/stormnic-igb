@@ -116,6 +116,12 @@ sc-build scripts/test-ovmf.sh        # QEMU igb (82576) + OVMF: the check app le
       sequence (`Net::tx_seq`/`tx_done`), tokens aborted at every ring
       reset and handed back, TRANSMIT_INTERRUPT when completion shows;
       `run` quiesces and goes to Started on a relink error; host tests
+- [ ] #10 Review finding bf153eab9dc0 (`src/igb.rs`, P1): the PHY
+      semaphore stayed held on a register error. `take_swsm` gives SMBI back
+      on any error after it is taken, `with_phy` gives SWSM back on every
+      path of the take (clearing the bit if its write/read-back failed) and
+      the release (`give_phy`) clears the bit even without SWSM; host tests
+      with a one-shot register fault in `test/sim.rs`
 - [x] #8 The same finding ec68cd8a67bf filed again: fixed by ec7a5b6;
       re-checked at 48a12c4 (every failed-quiesce path is `keep_dma` →
       `decode::abandon`, never `restore`; host tests pass), closed 2026-11-20
